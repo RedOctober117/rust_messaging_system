@@ -1,7 +1,7 @@
+use async_std::net::TcpStream;
 use serde::{Deserialize, Serialize};
-use std::{io::Write, net::TcpStream};
 
-use crate::message::{Destination, MessageData, MessageType};
+use crate::message::{Message, MessageData, Node};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
@@ -22,23 +22,22 @@ impl User {
         self.id
     }
 
-    pub fn send_message(
+    pub async fn send_message(
         &mut self,
-        mut connection: &TcpStream,
-        mut message: MessageData,
-    ) -> std::io::Result<()> {
-        let ser_message = message.as_json()?;
-        connection.write_all(&ser_message.as_bytes())?;
-        connection.flush().unwrap();
-        connection.shutdown(std::net::Shutdown::Both)
+        connection: &TcpStream,
+        data: MessageData,
+        destination: Node,
+    ) -> async_std::io::Result<()> {
+        let mut message = Message::new(Node::UserID(self.id), destination, data);
+        message.send(&connection).await
     }
 
-    pub fn send_self(&mut self, mut connection: &TcpStream) -> std::io::Result<()> {
-        let ser_message =
-            MessageData::new(Destination::Server, MessageType::User(self.clone())).as_json()?;
-
-        connection.write_all(&ser_message.as_bytes())?;
-        connection.flush().unwrap();
-        connection.shutdown(std::net::Shutdown::Both)
+    pub async fn send_self(
+        &mut self,
+        connection: &TcpStream,
+        server: Node,
+    ) -> async_std::io::Result<()> {
+        self.send_message(connection, MessageData::User(self.to_owned()), server)
+            .await
     }
 }

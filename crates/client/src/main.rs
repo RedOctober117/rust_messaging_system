@@ -3,67 +3,67 @@ use std::io::Read;
 use std::io::Result;
 use std::net::{IpAddr, Ipv4Addr, TcpStream};
 
+use async_std::task;
+use async_std::task::block_on;
 use client_session::ClientSession;
 use futures::join;
-use shared::message::{Destination, MessageData, MessageType};
+use futures::TryFutureExt;
+use shared::message::{Message, MessageData, Node};
 use shared::user::User;
 
 pub mod client_session;
 
 #[async_std::main]
 async fn main() -> Result<()> {
-    let future_1 = async {
-        println!("starting client 0 thread");
-        let mut text_user = User::new(0, "text".into());
-
-        let connection_addr = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
-        let conn = establish_connection(connection_addr).unwrap();
+    let server_addr = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
+    let future_1 = task::spawn(async move {
+        println!("starting client 0 task");
 
         let mut session = ClientSession::new(
-            &mut text_user,
+            User::new(0, "text".into()),
             (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5001),
-            connection_addr,
+            server_addr.clone(),
         )
+        .await
         .unwrap();
 
         // session.process_loop().await.unwrap();
 
-        let test_message = MessageData::new(
-            Destination::User(1),
-            MessageType::Text("Hello from client!".into()),
-        );
+        println!("sending user 0");
+        session.send_user().await.unwrap();
 
-        text_user.send_message(&conn, test_message).unwrap();
-        println!("user 0 sending hello to user 1");
-    }
-    .await;
+        println!("sending message to user 1");
+        session
+            .send_message(
+                MessageData::Text("Hello from user 0".into()),
+                Node::UserID(1),
+            )
+            .await
+            .unwrap();
 
-    let future_2 = async {
-        println!("starting client 1 thread");
-        let mut image_user = User::new(1, "image".into());
+        // session.process_loop().await.unwrap();
+    });
 
-        let connection_addr = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
-        let conn = establish_connection(connection_addr).unwrap();
+    let future_2 = task::spawn(async move {
+        println!("starting client 1 task");
 
         let mut session = ClientSession::new(
-            &mut image_user,
+            User::new(1, "image".into()),
             (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5002),
-            connection_addr,
+            server_addr.clone(),
         )
+        .await
         .unwrap();
-        // session.process_loop().await.unwrap();
 
-        let mut file = File::open("test_image.jpg").unwrap();
-        let mut file_buffer: Vec<u8> = vec![];
-        file.read_to_end(&mut file_buffer)
-            .expect("couldnt read file to vec");
+        println!("sending user 1");
+        session.send_user().await.unwrap();
 
-        let test_message = MessageData::new(Destination::User(0), MessageType::File(file_buffer));
+        println!("user 1 waiting for connections");
+        session.process_loop().await.unwrap();
+    });
 
-        println!("user 1 is sending image to user 0");
-        image_user.send_message(&conn, test_message).unwrap();
-    }
-    .await;
+    block_on(future_1);
+    block_on(future_2);
 
     Ok(())
 }
