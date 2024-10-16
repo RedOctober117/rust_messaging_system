@@ -4,30 +4,34 @@ use async_std::stream::StreamExt;
 use std::io::Result;
 
 use async_std::task;
-use shared::message::{Message, MessageData, Node};
+use shared::message::{Message, MessageBody, Node};
 use shared::user::User;
 
 pub struct ClientSession {
     user: User,
-    location: (IpAddr, u16),
+
     listener: TcpListener,
-    server: TcpStream,
+    server_addr: (IpAddr, u16),
 }
 
 impl ClientSession {
-    pub async fn new(user: User, location: (IpAddr, u16), server: (IpAddr, u16)) -> Result<Self> {
+    pub async fn new(user: User, server: (IpAddr, u16)) -> Result<Self> {
+        let addr = user.location();
         Ok(Self {
             user,
-            location,
-            listener: TcpListener::bind(location).await?,
-            server: TcpStream::connect(server).await?,
+            listener: TcpListener::bind(addr).await?,
+            server_addr: server,
         })
     }
 
-    pub async fn send_user(&mut self) -> Result<()> {
+    pub async fn send_user(&mut self) -> shared::message::MessageResult<()> {
+        let conn = TcpStream::connect(self.server_addr).await?;
+
         self.user
-            .send_self(&self.server, shared::message::Node::Server)
+            .send_self(&conn, shared::message::Node::Server)
             .await?;
+
+        conn.shutdown(std::net::Shutdown::Both).unwrap();
         Ok(())
     }
 
@@ -35,10 +39,17 @@ impl ClientSession {
         Node::UserID(self.user.id())
     }
 
-    pub async fn send_message(&mut self, message: MessageData, destination: Node) -> Result<()> {
-        self.user
-            .send_message(&self.server, message, destination)
-            .await
+    pub async fn send_message(
+        &mut self,
+        message: MessageBody,
+        destination: Node,
+    ) -> shared::message::MessageResult<()> {
+        let conn = TcpStream::connect(self.server_addr).await?;
+
+        self.user.send_message(&conn, message, destination).await?;
+
+        conn.shutdown(std::net::Shutdown::Both).unwrap();
+        Ok(())
     }
 }
 
@@ -46,7 +57,7 @@ pub fn request_user_info() {
     todo!()
 }
 
-pub async fn process_loop(session: ClientSession) -> Result<()> {
+pub async fn process_loop(session: ClientSession) -> shared::message::MessageResult<()> {
     let mut incoming = session.listener.incoming();
 
     while let Some(connection) = incoming.next().await {
@@ -56,14 +67,14 @@ pub async fn process_loop(session: ClientSession) -> Result<()> {
             connection.read_to_string(&mut deser_message_str);
             match serde_json::from_str::<Message>(&deser_message_str) {
                 Ok(data) => match data.get_data() {
-                    MessageData::Text(s) => println!("{} got {s}", session.user.id()),
-                    MessageData::File(_) => println!("{} got file", session.user.id()),
-                    MessageData::User(user) => {
-                        println!("{} got user {:?}", session.user.id(), user)
+                    MessageBody::Text(s) => println!("got {s}",),
+                    MessageBody::File(_) => println!("got file",),
+                    MessageBody::User(user) => {
+                        println!(" got user {:?}", user)
                     }
-                    MessageData::Failure(_) => println!("{} got failure", session.user.id()),
+                    MessageBody::Failure(_) => println!("got failure",),
                 },
-                Err(e) => println!("{} Could not process connection, {}", session.user.id(), e),
+                Err(e) => println!("Could not process connection, {}", e),
             }
             // Ok(())
         });

@@ -1,17 +1,20 @@
-use async_std::net::TcpStream;
+use std::net::IpAddr;
+
+use async_std::{io::WriteExt, net::TcpStream};
 use serde::{Deserialize, Serialize};
 
-use crate::message::{Message, MessageData, Node};
+use crate::message::{self, Message, MessageBody, Node};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
     id: u16,
     name: String,
+    location: (IpAddr, u16),
 }
 
 impl User {
-    pub fn new(id: u16, name: String) -> Self {
-        Self { id, name }
+    pub fn new(id: u16, name: String, location: (IpAddr, u16)) -> Self {
+        Self { id, name, location }
     }
 
     pub fn as_json(&self) -> Result<String, serde_json::Error> {
@@ -22,22 +25,36 @@ impl User {
         self.id
     }
 
+    pub fn location(&self) -> (IpAddr, u16) {
+        self.location
+    }
+
     pub async fn send_message(
         &mut self,
         connection: &TcpStream,
-        data: MessageData,
+        data: MessageBody,
         destination: Node,
-    ) -> async_std::io::Result<()> {
-        let mut message = Message::new(Node::UserID(self.id), destination, data);
-        message.send(&connection).await
+    ) -> message::MessageResult<()> {
+        let message = Message::new(Node::UserID(self.id), destination, data);
+        message::send_message(&connection, message).await
     }
 
     pub async fn send_self(
         &mut self,
-        connection: &TcpStream,
+        mut connection: &TcpStream,
         server: Node,
-    ) -> async_std::io::Result<()> {
-        self.send_message(connection, MessageData::User(self.to_owned()), server)
-            .await
+    ) -> message::MessageResult<()> {
+        message::send_message(
+            connection,
+            Message::new(
+                Node::UserID(self.id),
+                server,
+                MessageBody::User(self.to_owned()),
+            ),
+        )
+        .await?;
+        connection.flush().await?;
+
+        Ok(())
     }
 }
