@@ -10,8 +10,11 @@ pub struct Message {
     destination: Node,
     data: MessageBody,
 }
-
 impl Message {
+    pub fn builder() -> MessageBuilder {
+        MessageBuilder::default()
+    }
+
     pub fn new(source: Node, destination: Node, data: MessageBody) -> Self {
         Self {
             source,
@@ -34,6 +37,82 @@ impl Message {
 
     pub fn get_source(&self) -> Node {
         self.source
+    }
+
+    pub fn as_netstring(mut self) -> MessageResult<String> {
+        let serialized_message = self.as_json()?;
+
+        let normalized_message = format!("{}:{}", serialized_message.len(), serialized_message);
+
+        Ok(normalized_message)
+    }
+
+    // uses netstring: https://en.wikipedia.org/wiki/Netstring
+    // /// Does not establish connection automatically
+    // pub async fn send(mut self, mut connection: TcpStream) -> MessageResult<()> {
+    //     let serialized_message = self.as_json()?;
+    //     if serialized_message.len() > 2990 {
+    //         return Err(Box::new(MessageError::MessageTooLong));
+    //     }
+
+    //     let size_component = format!("{}:", serialized_message.len());
+    //     let normalized_message = format!("{}{}", size_component, serialized_message);
+    //     info!("Sent {}", normalized_message);
+
+    //     connection.write_all(normalized_message.as_bytes()).await?;
+
+    //     connection.flush().await?;
+
+    //     Ok(())
+    // }
+}
+
+pub struct MessageBuilder {
+    source: Node,
+    destination: Node,
+    data: MessageBody,
+}
+
+impl MessageBuilder {
+    pub fn new() -> Self {
+        Self {
+            source: Node::Server,
+            destination: Node::Server,
+            data: MessageBody::Text("".into()),
+        }
+    }
+
+    pub fn source(mut self, src: Node) -> Self {
+        self.source = src;
+        self
+    }
+
+    pub fn destination(mut self, dest: Node) -> Self {
+        self.destination = dest;
+        self
+    }
+
+    pub fn data(mut self, message_body: MessageBody) -> Self {
+        self.data = message_body;
+        self
+    }
+
+    pub fn build(&self) -> Message {
+        Message {
+            source: self.source,
+            destination: self.destination,
+            data: self.data.to_owned(),
+        }
+    }
+}
+
+impl Default for MessageBuilder {
+    fn default() -> Self {
+        Self {
+            source: Node::Server,
+            destination: Node::Server,
+            data: MessageBody::Text("".into()),
+        }
     }
 }
 
@@ -72,23 +151,23 @@ pub type MessageResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // uses netstring: https://en.wikipedia.org/wiki/Netstring
 /// Does not establish connection automatically
-pub async fn send_message(mut connection: TcpStream, mut message: Message) -> MessageResult<()> {
-    let serialized_message = message.as_json()?;
-    if serialized_message.len() > 2990 {
-        return Err(Box::new(MessageError::MessageTooLong));
-    }
+// pub async fn send_message(mut connection: TcpStream, mut message: Message) -> MessageResult<()> {
+//     let serialized_message = message.as_json()?;
+//     if serialized_message.len() > 2990 {
+//         return Err(Box::new(MessageError::MessageTooLong));
+//     }
 
-    let size_component = format!("{}:", serialized_message.len());
-    let normalized_message = format!("{}{}", size_component, serialized_message);
-    info!("Sent {}", normalized_message);
+//     let size_component = format!("{}:", serialized_message.len());
+//     let normalized_message = format!("{}{}", size_component, serialized_message);
+//     info!("Sent {}", normalized_message);
 
-    connection.write_all(normalized_message.as_bytes()).await?;
+//     connection.write_all(normalized_message.as_bytes()).await?;
 
-    connection.flush().await?;
+//     connection.flush().await?;
 
-    Ok(())
-    // connection.flush().await
-}
+//     Ok(())
+//     // connection.flush().await
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MessageBody {
