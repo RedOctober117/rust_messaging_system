@@ -1,4 +1,4 @@
-use async_std::{io::WriteExt, net::TcpStream};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use serde::{Deserialize, Serialize};
 
@@ -72,7 +72,7 @@ pub type MessageResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // uses netstring: https://en.wikipedia.org/wiki/Netstring
 /// Does not establish connection automatically
-pub async fn send_message(mut connection: &TcpStream, mut message: Message) -> MessageResult<()> {
+pub async fn send_message(mut connection: TcpStream, mut message: Message) -> MessageResult<()> {
     let serialized_message = message.as_json()?;
     if serialized_message.len() > 2990 {
         return Err(Box::new(MessageError::MessageTooLong));

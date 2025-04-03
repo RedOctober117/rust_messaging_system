@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 
-use async_std::{io::WriteExt, net::TcpStream};
 use serde::{Deserialize, Serialize};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::message::{self, Message, MessageBody, Node};
 
@@ -36,7 +36,7 @@ impl User {
         destination: Node,
     ) -> message::MessageResult<()> {
         let message = Message::new(Node::UserID(self.id), destination, data);
-        message::send_message(connection, message).await
+        message::send_message(&connection, message).await
     }
 
     pub async fn send_self(
@@ -53,6 +53,7 @@ impl User {
             ),
         )
         .await?;
+
         connection.flush().await?;
 
         Ok(())

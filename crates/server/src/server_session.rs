@@ -1,8 +1,7 @@
-use async_std::io::{ReadExt, Result};
-use async_std::net::{TcpListener, TcpStream};
-use async_std::stream::StreamExt;
-use async_std::sync::RwLock;
-use async_std::task;
+use tokio::io::{AsyncReadExt, Result};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use tokio::task;
 
 use shared::message::{self, Message, Node};
 use shared::user::*;
@@ -45,13 +44,14 @@ impl ServerSession {
 pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
     info!("waiting. . .");
     let session_1 = Arc::clone(&session);
-    let mut incoming = session_1.listener.incoming();
 
-    while let Some(stream) = incoming.next().await {
+    loop {
+        let (stream, _) = session.listener.accept().await?;
+
         let session_clone = Arc::clone(&session);
         println!();
         task::spawn(async move {
-            let mut stream = async_std::io::BufReader::new(stream.unwrap());
+            let mut stream = tokio::io::BufReader::new(stream);
             let mut stream_buffer: Vec<u8> = vec![];
 
             stream.read_to_end(&mut stream_buffer).await.unwrap();
@@ -78,7 +78,7 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                 Ok(message) => match message.get_destination() {
                     Node::UserID(id) => {
                         let session = Arc::clone(&session_clone);
-                        let mut writer = session.router.write_blocking();
+                        let mut writer = session.router.blocking_write();
                         writer.deref_mut().send_message(message).await.unwrap();
                     }
                     Node::Server => {
@@ -90,7 +90,7 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                             message::MessageBody::File(vec) => todo!(),
                             message::MessageBody::User(user) => {
                                 let session = Arc::clone(&session_clone);
-                                let mut writer = session.router.write_blocking();
+                                let mut writer = session.router.blocking_write();
                                 writer.deref_mut().route_user(user.id(), user.location());
                             }
                             message::MessageBody::Failure(_) => todo!(),
