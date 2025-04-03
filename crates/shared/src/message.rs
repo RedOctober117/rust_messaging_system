@@ -1,5 +1,3 @@
-use std::path::Display;
-
 use async_std::{io::WriteExt, net::TcpStream};
 
 use serde::{Deserialize, Serialize};
@@ -82,7 +80,7 @@ pub async fn send_message(mut connection: &TcpStream, mut message: Message) -> M
 
     let size_component = format!("{}:", serialized_message.len());
     let normalized_message = format!("{}{}", size_component, serialized_message);
-    println!("sent {}", normalized_message);
+    info!("Sent {}", normalized_message);
 
     connection.write_all(normalized_message.as_bytes()).await?;
 
@@ -98,6 +96,18 @@ pub enum MessageBody {
     File(Vec<u8>),
     User(User),
     Failure(String),
+    Request(Request),
+    Response(Response),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Request {
+    ReqUserID,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Response {
+    UserID(u16),
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

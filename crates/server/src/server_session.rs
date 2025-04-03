@@ -1,4 +1,4 @@
-use async_std::io::{BufReadExt, BufReader, ReadExt, Result};
+use async_std::io::{ReadExt, Result};
 use async_std::net::{TcpListener, TcpStream};
 use async_std::stream::StreamExt;
 use async_std::sync::RwLock;
@@ -7,7 +7,6 @@ use async_std::task;
 use shared::message::{self, Message, Node};
 use shared::user::*;
 use std::collections::HashMap;
-use std::io::Read;
 use std::net::IpAddr;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -44,7 +43,7 @@ impl ServerSession {
 }
 
 pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
-    println!("waiting. . .");
+    info!("waiting. . .");
     let session_1 = Arc::clone(&session);
     let mut incoming = session_1.listener.incoming();
 
@@ -83,9 +82,11 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                         writer.deref_mut().send_message(message).await.unwrap();
                     }
                     Node::Server => {
-                        println!("Server received: {:?}", message);
+                        info!("Server received: {:?}", message);
                         match message.get_data() {
-                            message::MessageBody::Text(s) => println!(""),
+                            message::MessageBody::Text(s) => {
+                                info!("server received message: {}", s)
+                            }
                             message::MessageBody::File(vec) => todo!(),
                             message::MessageBody::User(user) => {
                                 let session = Arc::clone(&session_clone);
@@ -93,6 +94,24 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                                 writer.deref_mut().route_user(user.id(), user.location());
                             }
                             message::MessageBody::Failure(_) => todo!(),
+                            message::MessageBody::Request(request) => match request {
+                                message::Request::ReqUserID => {
+                                    let id_length = session_clone.users.read().await.len();
+                                    message::send_message(
+                                        &stream.into_inner(),
+                                        Message::new(
+                                            Node::Server,
+                                            message.get_source(),
+                                            message::MessageBody::Response(
+                                                message::Response::UserID((id_length + 1) as u16),
+                                            ),
+                                        ),
+                                    )
+                                    .await
+                                    .unwrap();
+                                }
+                            },
+                            message::MessageBody::Response(response) => todo!(),
                         }
                     }
                 },
@@ -109,7 +128,7 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                 //     //         session.router.write().await.route_user(user.id(), stream);
                 //     //         println!("inserted user {}", user.id())
                 //     //     }
-                Err(e) => println!(
+                Err(e) => error!(
                     "Could not process data '{:?}': {}",
                     incoming_message_data, e
                 ),
@@ -144,7 +163,7 @@ impl Router {
                     let conn = TcpStream::connect(i).await?;
                     message::send_message(&conn, message).await?;
                 }
-                None => println!("wanted to send to user {}", i),
+                None => warn!("wanted to send to user {}", i),
             }
         }
 

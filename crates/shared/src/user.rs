@@ -36,7 +36,7 @@ impl User {
         destination: Node,
     ) -> message::MessageResult<()> {
         let message = Message::new(Node::UserID(self.id), destination, data);
-        message::send_message(&connection, message).await
+        message::send_message(connection, message).await
     }
 
     pub async fn send_self(
