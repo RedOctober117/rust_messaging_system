@@ -97,18 +97,18 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                             message::MessageBody::Request(request) => match request {
                                 message::Request::ReqUserID => {
                                     let id_length = session_clone.users.read().await.len();
-                                    message::send_message(
-                                        &stream.into_inner(),
-                                        Message::new(
-                                            Node::Server,
-                                            message.get_source(),
-                                            message::MessageBody::Response(
-                                                message::Response::UserID((id_length + 1) as u16),
-                                            ),
-                                        ),
-                                    )
-                                    .await
-                                    .unwrap();
+                                    // message::send_message(
+                                    //     &stream.into_inner(),
+                                    //     Message::new(
+                                    //         Node::Server,
+                                    //         message.get_source(),
+                                    //         message::MessageBody::Response(
+                                    //             message::Response::UserID((id_length + 1) as u16),
+                                    //         ),
+                                    //     ),
+                                    // )
+                                    // .await
+                                    // .unwrap();
                                 }
                             },
                             message::MessageBody::Response(response) => todo!(),
@@ -135,7 +135,6 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
             };
         });
     }
-    Ok(())
 }
 
 struct Router {
@@ -161,7 +160,7 @@ impl Router {
             match self.get_location(i) {
                 Some(i) => {
                     let conn = TcpStream::connect(i).await?;
-                    message::send_message(&conn, message).await?;
+                    // message::send_message(&conn, message).await?;
                 }
                 None => warn!("wanted to send to user {}", i),
             }
