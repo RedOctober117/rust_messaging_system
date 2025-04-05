@@ -1,4 +1,4 @@
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use std::time::{SystemTime, SystemTimeError};
 
 use serde::{Deserialize, Serialize};
 
@@ -8,23 +8,17 @@ use crate::user::User;
 pub struct Message {
     source: Node,
     destination: Node,
-    data: MessageBody,
+    timestamp: u64,
+    body: MessageBody,
 }
+
 impl Message {
     pub fn builder() -> MessageBuilder {
         MessageBuilder::default()
     }
 
-    pub fn new(source: Node, destination: Node, data: MessageBody) -> Self {
-        Self {
-            source,
-            destination,
-            data,
-        }
-    }
-
-    pub fn get_data(&self) -> &MessageBody {
-        &self.data
+    pub fn get_body(&self) -> &MessageBody {
+        &self.body
     }
 
     fn as_json(&mut self) -> Result<String, serde_json::Error> {
@@ -39,12 +33,20 @@ impl Message {
         self.source
     }
 
-    pub fn as_netstring(mut self) -> MessageResult<String> {
+    pub fn get_timestamp(&self) -> u64 {
+        self.timestamp
+    }
+
+    pub fn as_netstring(mut self) -> Result<String, serde_json::Error> {
         let serialized_message = self.as_json()?;
 
         let normalized_message = format!("{}:{}", serialized_message.len(), serialized_message);
 
         Ok(normalized_message)
+    }
+
+    pub fn from_netstring(netstr: &[u8]) -> Result<Message, serde_json::Error> {
+        serde_json::from_slice::<Message>(&netstr)
     }
 
     // uses netstring: https://en.wikipedia.org/wiki/Netstring
@@ -67,10 +69,12 @@ impl Message {
     // }
 }
 
+#[derive(Clone)]
 pub struct MessageBuilder {
     source: Node,
     destination: Node,
-    data: MessageBody,
+    timestamp: u64,
+    body: MessageBody,
 }
 
 impl MessageBuilder {
@@ -78,7 +82,8 @@ impl MessageBuilder {
         Self {
             source: Node::Server,
             destination: Node::Server,
-            data: MessageBody::Text("".into()),
+            timestamp: 0,
+            body: MessageBody::Text("".into()),
         }
     }
 
@@ -92,16 +97,28 @@ impl MessageBuilder {
         self
     }
 
-    pub fn data(mut self, message_body: MessageBody) -> Self {
-        self.data = message_body;
+    pub fn body(mut self, message_body: MessageBody) -> Self {
+        self.body = message_body;
         self
+    }
+
+    fn now() -> Result<u64, SystemTimeError> {
+        Ok(SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs())
+    }
+
+    pub fn timestamp(mut self) -> Result<Self, SystemTimeError> {
+        self.timestamp = Self::now()?;
+        Ok(self)
     }
 
     pub fn build(&self) -> Message {
         Message {
             source: self.source,
             destination: self.destination,
-            data: self.data.to_owned(),
+            timestamp: 0,
+            body: self.body.to_owned(),
         }
     }
 }
@@ -111,43 +128,44 @@ impl Default for MessageBuilder {
         Self {
             source: Node::Server,
             destination: Node::Server,
-            data: MessageBody::Text("".into()),
+            timestamp: 0,
+            body: MessageBody::Text("".into()),
         }
     }
 }
 
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum MessageError {
-    MessageTooLong,
-    SerdeError(serde_json::Error),
-    IoError(std::io::Error),
-}
+// #[derive(Debug)]
+// #[non_exhaustive]
+// pub enum MessageError {
+//     MessageTooLong,
+//     SerdeError(serde_json::Error),
+//     IoError(std::io::Error),
+// }
 
-impl std::error::Error for MessageError {}
+// impl std::error::Error for MessageError {}
 
-impl std::fmt::Display for MessageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MessageError::MessageTooLong => write!(f, "MessageError: MessageTooLong"),
-            MessageError::SerdeError(error) => write!(f, "MessageError: SerdeError: {}", error),
-            MessageError::IoError(error) => write!(f, "MessageError: IoError: {}", error),
-        }
-    }
-}
+// impl std::fmt::Display for MessageError {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             MessageError::MessageTooLong => write!(f, "MessageError: MessageTooLong"),
+//             MessageError::SerdeError(error) => write!(f, "MessageError: SerdeError: {}", error),
+//             MessageError::IoError(error) => write!(f, "MessageError: IoError: {}", error),
+//         }
+//     }
+// }
 
-impl From<serde_json::Error> for MessageError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::SerdeError(value)
-    }
-}
-impl From<std::io::Error> for MessageError {
-    fn from(value: std::io::Error) -> Self {
-        Self::IoError(value)
-    }
-}
+// impl From<serde_json::Error> for MessageError {
+//     fn from(value: serde_json::Error) -> Self {
+//         Self::SerdeError(value)
+//     }
+// }
+// impl From<std::io::Error> for MessageError {
+//     fn from(value: std::io::Error) -> Self {
+//         Self::IoError(value)
+//     }
+// }
 
-pub type MessageResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+// pub type MessageResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // uses netstring: https://en.wikipedia.org/wiki/Netstring
 /// Does not establish connection automatically

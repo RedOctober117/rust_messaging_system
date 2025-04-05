@@ -1,9 +1,5 @@
-use std::net::IpAddr;
-
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
-
-use crate::message::{self, Message, MessageBody, Node};
+use std::net::IpAddr;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {

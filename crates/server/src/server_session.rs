@@ -1,7 +1,9 @@
+use shared::message::{Message, MessageBody, Node};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
 use tokio::net::TcpListener;
 
 use std::net::IpAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 
 pub struct ServerSession {
@@ -44,15 +46,31 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
         // let session_clone = Arc::clone(&session);
         println!();
         tokio::spawn(async move {
+            let echo_template = Message::builder().source(Node::Server);
+
             loop {
                 let mut stream_buffer: Vec<u8> = Vec::new();
-                stream.read_buf(&mut stream_buffer).await.unwrap();
-                let buff_as_str = String::from_utf8(stream_buffer).unwrap();
+                stream.read_to_end(&mut stream_buffer).await.unwrap();
+                // let buff_as_str = String::from_utf8(stream_buffer).unwrap();
 
-                info!("GOT: {:?}", &buff_as_str);
+                let deser_buff = Message::from_netstring(&stream_buffer).unwrap();
+                info!("GOT: {:?}", &deser_buff);
+
+                let echo_body = match deser_buff.get_body() {
+                    MessageBody::Text(e) => MessageBody::Text(format!("ECHO: {}", e)),
+                    _ => todo!(),
+                };
+
+                let echo_msg = echo_template
+                    .clone()
+                    .destination(deser_buff.get_source())
+                    .body(echo_body)
+                    .timestamp()
+                    .unwrap()
+                    .build();
 
                 stream
-                    .write_all(format!("ECHO: {}", &buff_as_str).as_bytes())
+                    .write_all(echo_msg.as_netstring().unwrap().as_bytes())
                     .await
                     .unwrap();
 
@@ -61,6 +79,7 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
         });
     }
 }
+
 //     let mut stream = tokio::io::BufReader::new(stream);
 //     let mut stream_buffer: Vec<u8> = vec![];
 

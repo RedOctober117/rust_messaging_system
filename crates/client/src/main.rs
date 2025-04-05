@@ -1,6 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
+use shared::message::{MessageBody, MessageBuilder, Node};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest, Result};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
@@ -19,8 +20,24 @@ async fn main() -> Result<()> {
     let client_1_handle = tokio::spawn(async move {
         let mut stream = TcpStream::connect(server_addr).await.unwrap();
 
+        let msg_template = MessageBuilder::new()
+            .source(Node::UserID(0))
+            .destination(Node::Server);
+
+        let greeting = msg_template
+            .clone()
+            .body(MessageBody::Text("Hello from client 0".into()))
+            .timestamp()
+            .unwrap()
+            .build();
+
         info!("Sending hello from client 1. . .");
-        stream.write_all(b"Hello from client 1!").await.unwrap();
+        stream
+            .write(greeting.as_netstring().unwrap().as_bytes())
+            .await
+            .unwrap();
+
+        stream.flush().await.unwrap();
 
         loop {
             sleep(Duration::from_secs(1)).await;
@@ -39,7 +56,17 @@ async fn main() -> Result<()> {
             }
 
             if stream_status.is_writable() {
-                stream.write_all(b"ping!").await.unwrap();
+                let ping = msg_template
+                    .clone()
+                    .body(MessageBody::Text("ping!".into()))
+                    .timestamp()
+                    .unwrap()
+                    .build();
+
+                stream
+                    .write(ping.as_netstring().unwrap().as_bytes())
+                    .await
+                    .unwrap();
                 stream.flush().await.unwrap();
             }
         }
