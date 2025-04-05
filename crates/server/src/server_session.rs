@@ -1,5 +1,5 @@
 use shared::message::{Message, MessageBody, Node};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
 use tokio::net::TcpListener;
 
 use std::net::IpAddr;
@@ -41,40 +41,46 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
     info!("waiting. . .");
 
     loop {
-        let (mut stream, _) = session.listener.accept().await?;
+        let (stream, _) = session.listener.accept().await?;
+        let (reader, writer) = stream.into_split();
 
-        // let session_clone = Arc::clone(&session);
-        println!();
+        let mut buf_reader = BufReader::new(reader);
+        let mut buf_writer = BufWriter::new(writer);
+
         tokio::spawn(async move {
             let echo_template = Message::builder().source(Node::Server);
 
             loop {
-                let mut stream_buffer: Vec<u8> = Vec::new();
-                stream.read_to_end(&mut stream_buffer).await.unwrap();
-                // let buff_as_str = String::from_utf8(stream_buffer).unwrap();
+                let received: Vec<u8> = buf_reader.fill_buf().await.unwrap().to_vec();
+                if received.len() > 0 {
+                    match serde_json::from_slice::<Message>(&received) {
+                        Ok(m) => {
+                            info!("GOT: {:?}", m);
+                        }
+                        Err(e) => warn!("Failed to parse message: {e}"),
+                    }
+                }
+                buf_reader.consume(received.len());
 
-                let deser_buff = Message::from_netstring(&stream_buffer).unwrap();
-                info!("GOT: {:?}", &deser_buff);
+                // let echo_body = match deser_buff.get_body() {
+                //     MessageBody::Text(e) => MessageBody::Text(format!("ECHO: {}", e)),
+                //     _ => todo!(),
+                // };
 
-                let echo_body = match deser_buff.get_body() {
-                    MessageBody::Text(e) => MessageBody::Text(format!("ECHO: {}", e)),
-                    _ => todo!(),
-                };
+                // let echo_msg = echo_template
+                //     .clone()
+                //     .destination(deser_buff.get_source())
+                //     .body(echo_body)
+                //     .timestamp()
+                //     .unwrap()
+                //     .build();
 
-                let echo_msg = echo_template
-                    .clone()
-                    .destination(deser_buff.get_source())
-                    .body(echo_body)
-                    .timestamp()
-                    .unwrap()
-                    .build();
+                // stream
+                //     .write_all(echo_msg.as_netstring().unwrap().as_bytes())
+                //     .await
+                //     .unwrap();
 
-                stream
-                    .write_all(echo_msg.as_netstring().unwrap().as_bytes())
-                    .await
-                    .unwrap();
-
-                stream.flush().await.unwrap();
+                // stream.flush().await.unwrap();
             }
         });
     }

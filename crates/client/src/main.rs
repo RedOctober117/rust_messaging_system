@@ -1,15 +1,16 @@
+use shared::message::{MessageBody, MessageBuilder, Node};
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
-
-use shared::message::{MessageBody, MessageBuilder, Node};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest, Result};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-pub mod client_session;
 
 extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
+
+pub mod client_session;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,44 +19,49 @@ async fn main() -> Result<()> {
     let server_addr: (IpAddr, u16) = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
 
     let client_1_handle = tokio::spawn(async move {
-        let mut stream = TcpStream::connect(server_addr).await.unwrap();
-
-        let msg_template = MessageBuilder::new()
-            .source(Node::UserID(0))
-            .destination(Node::Server);
-
-        let greeting = msg_template
-            .clone()
-            .body(MessageBody::Text("Hello from client 0".into()))
-            .timestamp()
-            .unwrap()
-            .build();
-
-        info!("Sending hello from client 1. . .");
-        stream
-            .write(greeting.as_netstring().unwrap().as_bytes())
-            .await
-            .unwrap();
-
-        stream.flush().await.unwrap();
+        let (mut reader, mut writer): (OwnedReadHalf, OwnedWriteHalf);
 
         loop {
+            if let Ok(s) = TcpStream::connect(server_addr).await {
+                (reader, writer) = s.into_split();
+                break;
+            }
+            warn!("No server found, retrying in 1 second.");
             sleep(Duration::from_secs(1)).await;
-            let stream_status = stream
-                .ready(Interest::READABLE | Interest::WRITABLE)
+        }
+
+        let reader_handle = tokio::spawn(async move {
+            let mut buff: Vec<u8> = Vec::new();
+            reader.read_buf(&mut buff).await.unwrap();
+
+            if buff.len() > 0 {
+                info!("Received {} from server.", String::from_utf8(buff).unwrap());
+            }
+        });
+
+        let writer_handle = tokio::spawn(async move {
+            let msg_template = MessageBuilder::new()
+                .source(Node::UserID(0))
+                .destination(Node::Server);
+
+            let greeting = msg_template
+                .clone()
+                .body(MessageBody::Text("Hello from client 0".into()))
+                .timestamp()
+                .unwrap()
+                .build();
+
+            info!("Sending hello from client 1. . .");
+
+            writer
+                .write(&serde_json::to_vec(&greeting).unwrap())
                 .await
                 .unwrap();
 
-            if stream_status.is_readable() {
-                let mut buff: Vec<u8> = Vec::new();
-                stream.read_buf(&mut buff).await.unwrap();
+            writer.flush().await.unwrap();
 
-                if buff.len() > 0 {
-                    info!("Received {} from server.", String::from_utf8(buff).unwrap());
-                }
-            }
-
-            if stream_status.is_writable() {
+            loop {
+                sleep(Duration::from_secs(1)).await;
                 let ping = msg_template
                     .clone()
                     .body(MessageBody::Text("ping!".into()))
@@ -63,13 +69,19 @@ async fn main() -> Result<()> {
                     .unwrap()
                     .build();
 
-                stream
-                    .write(ping.as_netstring().unwrap().as_bytes())
+                writer
+                    .write(&serde_json::to_vec(&ping).unwrap())
                     .await
                     .unwrap();
-                stream.flush().await.unwrap();
+
+                writer.flush().await.unwrap();
             }
-        }
+        });
+
+        reader_handle.await.unwrap();
+        writer_handle.await.unwrap();
+
+        Ok(())
     });
 
     client_1_handle.await.unwrap()
