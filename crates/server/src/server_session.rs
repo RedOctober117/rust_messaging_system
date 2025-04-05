@@ -1,9 +1,8 @@
 use shared::message::{Message, MessageBody, Node};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
 use tokio::net::TcpListener;
 
 use std::net::IpAddr;
-use std::ops::Deref;
 use std::sync::Arc;
 
 pub struct ServerSession {
@@ -55,25 +54,30 @@ pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
                 if received.len() > 0 {
                     match serde_json::from_slice::<Message>(&received) {
                         Ok(m) => {
-                            info!("GOT: {:?}", m);
+                            info!("RECEIVED: {:?}", m);
+
+                            let echo_body = MessageBody::Text(format!("ECHO: {:?}", m.get_body()));
+
+                            let echo_msg = echo_template
+                                .clone()
+                                .destination(m.get_source())
+                                .body(echo_body)
+                                .timestamp()
+                                .unwrap()
+                                .build();
+
+                            buf_writer
+                                .write_all(&serde_json::to_vec(&echo_msg).unwrap())
+                                .await
+                                .unwrap();
+
+                            buf_writer.flush().await.unwrap();
+                            info!("SENT: {:?}", echo_msg);
                         }
                         Err(e) => warn!("Failed to parse message: {e}"),
                     }
                 }
                 buf_reader.consume(received.len());
-
-                // let echo_body = match deser_buff.get_body() {
-                //     MessageBody::Text(e) => MessageBody::Text(format!("ECHO: {}", e)),
-                //     _ => todo!(),
-                // };
-
-                // let echo_msg = echo_template
-                //     .clone()
-                //     .destination(deser_buff.get_source())
-                //     .body(echo_body)
-                //     .timestamp()
-                //     .unwrap()
-                //     .build();
 
                 // stream
                 //     .write_all(echo_msg.as_netstring().unwrap().as_bytes())

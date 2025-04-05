@@ -1,8 +1,8 @@
-use shared::message::{MessageBody, MessageBuilder, Node};
+use shared::message::{Message, MessageBody, MessageBuilder, Node};
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Result};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf, ReadHalf, WriteHalf};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
@@ -18,73 +18,88 @@ async fn main() -> Result<()> {
 
     let server_addr: (IpAddr, u16) = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
 
-    let client_1_handle = tokio::spawn(async move {
-        let (mut reader, mut writer): (OwnedReadHalf, OwnedWriteHalf);
+    // let client_1_handle = tokio::spawn(async move {
+    let (reader, writer): (OwnedReadHalf, OwnedWriteHalf);
 
-        loop {
-            if let Ok(s) = TcpStream::connect(server_addr).await {
-                (reader, writer) = s.into_split();
-                break;
-            }
-            warn!("No server found, retrying in 1 second.");
-            sleep(Duration::from_secs(1)).await;
+    let mut buf_reader: BufReader<OwnedReadHalf>;
+    let mut buf_writer: BufWriter<OwnedWriteHalf>;
+
+    loop {
+        if let Ok(s) = TcpStream::connect(server_addr).await {
+            (reader, writer) = s.into_split();
+            buf_reader = BufReader::new(reader);
+            buf_writer = BufWriter::new(writer);
+
+            break;
         }
 
-        let reader_handle = tokio::spawn(async move {
-            let mut buff: Vec<u8> = Vec::new();
-            reader.read_buf(&mut buff).await.unwrap();
+        warn!("No server found, retrying in 1 second.");
+        sleep(Duration::from_secs(1)).await;
+    }
 
-            if buff.len() > 0 {
-                info!("Received {} from server.", String::from_utf8(buff).unwrap());
+    let reader_handle = tokio::spawn(async move {
+        loop {
+            let received = buf_reader.fill_buf().await.unwrap().to_vec();
+            if received.len() > 0 {
+                match serde_json::from_slice::<Message>(&received) {
+                    Ok(m) => {
+                        info!("RECEIVED: {:?}", m);
+                    }
+                    Err(e) => warn!("Could not parse buffer, {e}"),
+                }
             }
-        });
 
-        let writer_handle = tokio::spawn(async move {
-            let msg_template = MessageBuilder::new()
-                .source(Node::UserID(0))
-                .destination(Node::Server);
+            buf_reader.consume(received.len());
+        }
+    });
 
-            let greeting = msg_template
+    let writer_handle = tokio::spawn(async move {
+        let msg_template = MessageBuilder::new()
+            .source(Node::UserID(0))
+            .destination(Node::Server);
+
+        let greeting = msg_template
+            .clone()
+            .body(MessageBody::Text("Hello from client 0".into()))
+            .timestamp()
+            .unwrap()
+            .build();
+
+        info!("Sending hello from client 1. . .");
+
+        buf_writer
+            .write(&serde_json::to_vec(&greeting).unwrap())
+            .await
+            .unwrap();
+
+        buf_writer.flush().await.unwrap();
+
+        loop {
+            sleep(Duration::from_secs(1)).await;
+            let ping = msg_template
                 .clone()
-                .body(MessageBody::Text("Hello from client 0".into()))
+                .body(MessageBody::Text("ping!".into()))
                 .timestamp()
                 .unwrap()
                 .build();
 
-            info!("Sending hello from client 1. . .");
-
-            writer
-                .write(&serde_json::to_vec(&greeting).unwrap())
+            buf_writer
+                .write(&serde_json::to_vec(&ping).unwrap())
                 .await
                 .unwrap();
 
-            writer.flush().await.unwrap();
-
-            loop {
-                sleep(Duration::from_secs(1)).await;
-                let ping = msg_template
-                    .clone()
-                    .body(MessageBody::Text("ping!".into()))
-                    .timestamp()
-                    .unwrap()
-                    .build();
-
-                writer
-                    .write(&serde_json::to_vec(&ping).unwrap())
-                    .await
-                    .unwrap();
-
-                writer.flush().await.unwrap();
-            }
-        });
-
-        reader_handle.await.unwrap();
-        writer_handle.await.unwrap();
-
-        Ok(())
+            buf_writer.flush().await.unwrap();
+            info!("SENT: {:?}", ping);
+        }
     });
 
-    client_1_handle.await.unwrap()
+    reader_handle.await.unwrap();
+    writer_handle.await.unwrap();
+
+    Ok(())
+    // });
+
+    // client_1_handle.await.unwrap()
 }
 // let future_1 = tokio::spawn(async move {
 //     info!("starting client 0 task");
