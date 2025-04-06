@@ -1,7 +1,7 @@
 use std::io::Result;
 use std::net::{IpAddr, Ipv4Addr};
 
-use server_session::ServerSession;
+use server_session::TcpOrchestrator;
 
 pub mod server_session;
 
@@ -16,8 +16,8 @@ async fn main() -> Result<()> {
 
     info!("Server is initializing. . .");
 
-    let session = ServerSession::new((IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000)).await?;
+    let mut session = TcpOrchestrator::new((IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000));
 
     info!("Ready to accept connections!");
-    session.process_connections().await
+    session.process_loop().await
 }

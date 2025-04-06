@@ -1,4 +1,5 @@
 use shared::message::{Message, MessageBody, MessageBuilder, Node};
+use shared::user::User;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
@@ -58,9 +59,11 @@ async fn main() -> Result<()> {
             .source(Node::UserID(0))
             .destination(Node::Server);
 
-        let greeting = msg_template
+        let auth = msg_template
             .clone()
-            .body(MessageBody::Text("Hello from client 0".into()))
+            .body(MessageBody::Request(
+                shared::message::Request::Authenticate(User::new(0, "test".into(), server_addr)),
+            ))
             .timestamp()
             .unwrap()
             .build();
@@ -68,29 +71,29 @@ async fn main() -> Result<()> {
         info!("Sending hello from client 1. . .");
 
         buf_writer
-            .write(&serde_json::to_vec(&greeting).unwrap())
+            .write(&serde_json::to_vec(&auth).unwrap())
             .await
             .unwrap();
 
         buf_writer.flush().await.unwrap();
 
-        loop {
-            sleep(Duration::from_secs(1)).await;
-            let ping = msg_template
-                .clone()
-                .body(MessageBody::Text("ping!".into()))
-                .timestamp()
-                .unwrap()
-                .build();
+        // loop {
+        //     sleep(Duration::from_secs(1)).await;
+        //     let ping = msg_template
+        //         .clone()
+        //         .body(MessageBody::Text("ping!".into()))
+        //         .timestamp()
+        //         .unwrap()
+        //         .build();
 
-            buf_writer
-                .write(&serde_json::to_vec(&ping).unwrap())
-                .await
-                .unwrap();
+        //     buf_writer
+        //         .write(&serde_json::to_vec(&ping).unwrap())
+        //         .await
+        //         .unwrap();
 
-            buf_writer.flush().await.unwrap();
-            info!("SENT: {:?}", ping);
-        }
+        //     buf_writer.flush().await.unwrap();
+        //     info!("SENT: {:?}", ping);
+        // }
     });
 
     reader_handle.await.unwrap();

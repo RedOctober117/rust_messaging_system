@@ -200,6 +200,7 @@ pub enum MessageBody {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Request {
     ReqUserID,
+    Authenticate(User),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
