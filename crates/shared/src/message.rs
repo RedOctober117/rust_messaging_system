@@ -117,7 +117,7 @@ impl MessageBuilder {
         Message {
             source: self.source,
             destination: self.destination,
-            timestamp: 0,
+            timestamp: self.timestamp,
             body: self.body.to_owned(),
         }
     }
@@ -205,6 +205,8 @@ pub enum Request {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Response {
     UserID(u16),
+    AuthSuccess,
+    AuthFailure,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

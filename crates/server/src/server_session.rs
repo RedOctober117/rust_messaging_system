@@ -1,14 +1,22 @@
-use shared::message::{Message, MessageBody, Node};
+use futures::io::FillBuf;
+use futures::TryFutureExt;
+use shared::message::{Message, MessageBody, Node, Response};
+use shared::user::User;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
-use tokio::net::TcpListener;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 
+use std::collections::HashMap;
+use std::fmt::Display;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::ops::Deref;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 pub struct ServerSession {
     address: (IpAddr, u16),
     listener: TcpListener,
-    // users: RwLock<HashMap<u16, User>>,
+    // users: RwLock<HashMap<u16, Buffers>>,
     // router: RwLock<Router>,
 }
 
@@ -34,59 +42,118 @@ impl ServerSession {
     // pub fn get_users(&self) -> &HashMap<u16, User> {
     //     self.users.read()
     // }
+
+    /// Authenticates user. If users exists in the HashMap, authentication is rejected.
+    // async fn authenticate_user(self, user: User, buffers: Buffers) -> (bool, MessageBody) {
+    //     let users_r_lock = self.users.read().await;
+
+    //     if users_r_lock.contains_key(&user.id()) {
+    //         return (false, MessageBody::Response(Response::AuthFailure));
+    //     } else {
+    //         let mut users_w_lock = self.users.blocking_write();
+    //         users_w_lock.insert(user.id(), buffers);
+
+    //         return (true, MessageBody::Response(Response::AuthSuccess));
+    //     }
+    // }
+
+    pub async fn process_connections(self) -> Result<()> {
+        info!("waiting. . .");
+
+        loop {
+            let (stream, _) = self.listener.accept().await?;
+
+            // let mut user_write = self.users.write().await;
+            // user_write.insert(0, stream);
+
+            let (reader, writer) = stream.into_split();
+            let mut buf_read = BufReader::new(reader);
+            let mut buf_write = BufWriter::new(writer);
+
+            tokio::spawn(async move {
+                let echo_template = Message::builder().source(Node::Server);
+
+                loop {
+                    let received: Vec<u8> = buf_read.fill_buf().await.unwrap().to_vec();
+
+                    if received.len() > 0 {
+                        match serde_json::from_slice::<Message>(&received) {
+                            Ok(m) => {
+                                info!("RECEIVED: {:?}", m);
+                                match m.get_body().to_owned() {
+                                    MessageBody::Text(_) => todo!(),
+                                    MessageBody::File(items) => todo!(),
+                                    MessageBody::User(user) => {
+                                        // let auth = self
+                                        //     .authenticate_user(
+                                        //         user,
+                                        //         Buffers {
+                                        //             read: buf_reader,
+                                        //             write: buf_writer,
+                                        //         },
+                                        //     )
+                                        //     .await;
+                                    }
+                                    MessageBody::Failure(_) => todo!(),
+                                    MessageBody::Request(request) => todo!(),
+                                    MessageBody::Response(response) => todo!(),
+                                }
+
+                                // let echo_body = match m.get_body() {
+                                //     MessageBody::Text(m) => {
+                                //         MessageBody::Text(format!("ECHO: {}", m))
+                                //     }
+                                //     _ => todo!(),
+                                // };
+
+                                // let echo_msg = echo_template
+                                //     .clone()
+                                //     .destination(m.get_source())
+                                //     .body(echo_body)
+                                //     .timestamp()
+                                //     .unwrap()
+                                //     .build();
+
+                                // buf_writer
+                                //     .write_all(&serde_json::to_vec(&echo_msg).unwrap())
+                                //     .await
+                                //     .unwrap();
+
+                                // buf_writer.flush().await.unwrap();
+                                // info!("SENT: {:?}", echo_msg);
+                            }
+                            Err(e) => warn!("Failed to parse message: {e}"),
+                        }
+                    }
+
+                    buf_read.consume(received.len());
+
+                    // stream
+                    //     .write_all(echo_msg.as_netstring().unwrap().as_bytes())
+                    //     .await
+                    //     .unwrap();
+
+                    // stream.flush().await.unwrap();
+                }
+            });
+        }
+    }
 }
 
-pub async fn process_connections(session: Arc<ServerSession>) -> Result<()> {
-    info!("waiting. . .");
+#[derive(Debug, Clone)]
+pub enum AuthenticationError {
+    UserAlreadyPresent,
+    InvalidPassword,
+}
 
-    loop {
-        let (stream, _) = session.listener.accept().await?;
-        let (reader, writer) = stream.into_split();
+impl std::error::Error for AuthenticationError {}
 
-        let mut buf_reader = BufReader::new(reader);
-        let mut buf_writer = BufWriter::new(writer);
-
-        tokio::spawn(async move {
-            let echo_template = Message::builder().source(Node::Server);
-
-            loop {
-                let received: Vec<u8> = buf_reader.fill_buf().await.unwrap().to_vec();
-                if received.len() > 0 {
-                    match serde_json::from_slice::<Message>(&received) {
-                        Ok(m) => {
-                            info!("RECEIVED: {:?}", m);
-
-                            let echo_body = MessageBody::Text(format!("ECHO: {:?}", m.get_body()));
-
-                            let echo_msg = echo_template
-                                .clone()
-                                .destination(m.get_source())
-                                .body(echo_body)
-                                .timestamp()
-                                .unwrap()
-                                .build();
-
-                            buf_writer
-                                .write_all(&serde_json::to_vec(&echo_msg).unwrap())
-                                .await
-                                .unwrap();
-
-                            buf_writer.flush().await.unwrap();
-                            info!("SENT: {:?}", echo_msg);
-                        }
-                        Err(e) => warn!("Failed to parse message: {e}"),
-                    }
-                }
-                buf_reader.consume(received.len());
-
-                // stream
-                //     .write_all(echo_msg.as_netstring().unwrap().as_bytes())
-                //     .await
-                //     .unwrap();
-
-                // stream.flush().await.unwrap();
-            }
-        });
+impl Display for AuthenticationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthenticationError::InvalidPassword => write!(f, "Invalid password."),
+            AuthenticationError::UserAlreadyPresent => write!(f, "User is already present."),
+        }
     }
 }
 

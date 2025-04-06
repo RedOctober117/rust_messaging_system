@@ -19,5 +19,5 @@ async fn main() -> Result<()> {
     let session = ServerSession::new((IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000)).await?;
 
     info!("Ready to accept connections!");
-    server_session::process_connections(session.into()).await
+    session.process_connections().await
 }
