@@ -24,34 +24,4 @@ impl User {
     pub fn location(&self) -> (IpAddr, u16) {
         self.location
     }
-
-    // pub async fn send_message(
-    //     &mut self,
-    //     connection: &TcpStream,
-    //     data: MessageBody,
-    //     destination: Node,
-    // ) -> message::MessageResult<()> {
-    //     let message = Message::new(Node::UserID(self.id), destination, data);
-    //     message::send_message(connection, message).await
-    // }
-
-    // pub async fn send_self(
-    //     &mut self,
-    //     mut connection: &TcpStream,
-    //     server: Node,
-    // ) -> message::MessageResult<()> {
-    //     message::send_message(
-    //         connection,
-    //         Message::new(
-    //             Node::UserID(self.id),
-    //             server,
-    //             MessageBody::User(self.to_owned()),
-    //         ),
-    //     )
-    //     .await?;
-
-    //     connection.flush().await?;
-
-    //     Ok(())
-    // }
 }

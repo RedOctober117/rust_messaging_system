@@ -11,8 +11,6 @@ extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
 
-pub mod client_session;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     pretty_env_logger::init();
@@ -45,6 +43,28 @@ async fn main() -> Result<()> {
                 match serde_json::from_slice::<Message>(&received) {
                     Ok(m) => {
                         info!("RECEIVED: {:?}", m);
+                        match m.body() {
+                            MessageBody::Text(_) => todo!(),
+                            MessageBody::File(_) => todo!(),
+                            MessageBody::User(_) => todo!(),
+                            MessageBody::Failure(_) => todo!(),
+                            MessageBody::Request(_) => todo!(),
+                            MessageBody::Response(response) => match response {
+                                shared::message::Response::UserID(_) => todo!(),
+                                shared::message::Response::AuthSuccess => todo!(),
+                                shared::message::Response::AuthFailure => todo!(),
+                                shared::message::Response::Echo(t) => info!("Server echoed {t:?}"),
+                                shared::message::Response::Ping(t) => {
+                                    let time_to_server = m.timestamp() - t;
+                                    let time_from_server =
+                                        MessageBuilder::now().unwrap() - m.timestamp();
+                                    info!(
+                                        "Ping responded. Time to server: {}, Time from server: {}",
+                                        time_to_server, time_from_server
+                                    );
+                                }
+                            },
+                        }
                     }
                     Err(e) => warn!("Could not parse buffer, {e}"),
                 }
@@ -56,128 +76,47 @@ async fn main() -> Result<()> {
 
     let writer_handle = tokio::spawn(async move {
         let msg_template = MessageBuilder::new()
-            .source(Node::UserID(0))
+            .source(Node::UserID(1))
             .destination(Node::Server);
 
         let auth = msg_template
             .clone()
             .body(MessageBody::Request(
-                shared::message::Request::Authenticate(User::new(0, "test".into(), server_addr)),
+                shared::message::Request::Authenticate(User::new(1, "test".into(), server_addr)),
             ))
             .timestamp()
             .unwrap()
             .build();
 
         info!("Sending hello from client 1. . .");
-
         buf_writer
-            .write(&serde_json::to_vec(&auth).unwrap())
+            .write_all(&serde_json::to_vec(&auth).unwrap())
             .await
             .unwrap();
 
         buf_writer.flush().await.unwrap();
 
-        // loop {
-        //     sleep(Duration::from_secs(1)).await;
-        //     let ping = msg_template
-        //         .clone()
-        //         .body(MessageBody::Text("ping!".into()))
-        //         .timestamp()
-        //         .unwrap()
-        //         .build();
+        loop {
+            sleep(Duration::from_secs(3)).await;
+            let ping = msg_template
+                .clone()
+                .body(MessageBody::Request(shared::message::Request::Ping))
+                .timestamp()
+                .unwrap()
+                .build();
 
-        //     buf_writer
-        //         .write(&serde_json::to_vec(&ping).unwrap())
-        //         .await
-        //         .unwrap();
+            buf_writer
+                .write(&serde_json::to_vec(&ping).unwrap())
+                .await
+                .unwrap();
 
-        //     buf_writer.flush().await.unwrap();
-        //     info!("SENT: {:?}", ping);
-        // }
+            buf_writer.flush().await.unwrap();
+            info!("SENT: {:?}", ping);
+        }
     });
 
     reader_handle.await.unwrap();
     writer_handle.await.unwrap();
 
     Ok(())
-    // });
-
-    // client_1_handle.await.unwrap()
 }
-// let future_1 = tokio::spawn(async move {
-//     info!("starting client 0 task");
-
-//     let mut session = ClientSession::new(
-//         User::new(
-//             0,
-//             "text".into(),
-//             (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5001),
-//         ),
-//         server_addr.clone(),
-//     )
-//     .await
-//     .unwrap();
-
-//     // session.process_loop().await.unwrap();
-
-//     info!("sending user 0");
-//     session.send_user().await.unwrap();
-
-//     info!("sending message to user 1");
-
-//     let message = Message::builder();
-
-//     sleep(Duration::from_secs(1)).await;
-//     info!("sending message to user 1");
-//     let greeting = message
-//         .source(Node::UserID(0))
-//         .destination(Node::UserID(1))
-//         .data(MessageBody::Text("Hello from user 0!".into()))
-//         .build();
-
-//     session.send_message(greeting).await.unwrap();
-// });
-
-// let future_2 = tokio::spawn(async move {
-//     info!("starting client 1 task");
-
-//     let mut session = ClientSession::new(
-//         User::new(
-//             1,
-//             "image".into(),
-//             (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5002),
-//         ),
-//         server_addr.clone(),
-//     )
-//     .await
-//     .unwrap();
-
-//     // session.send_user().await.unwrap();
-//     info!("sending user 1");
-//     session.send_user().await.unwrap();
-
-//     info!("user 1 sending text");
-//     let msg_template = Message::builder();
-
-//     let greeting = msg_template
-//         .source(Node::UserID(1))
-//         .destination(Node::UserID(0))
-//         .data(MessageBody::Text("Hello from user 1!".into()))
-//         .build();
-
-//     session.send_message(greeting).await.unwrap();
-//     // session
-//     //     .send_message(
-//     //         MessageBody::Text("Hello from user 1".into()),
-//     //         Node::UserID(0),
-//     //     )
-//     //     .await
-//     //     .unwrap();
-//     // session.send_user().await.unwrap();
-
-//     info!("user 1 waiting for connections");
-//     // client_session::process_loop(session).await.unwrap()
-// });
-
-// tokio::spawn(future_1);
-// tokio::spawn(future_2);
