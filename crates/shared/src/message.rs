@@ -6,10 +6,10 @@ use crate::user::User;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    body: MessageBody,
+    timestamp: u64,
     source: Node,
     destination: Node,
-    timestamp: u64,
-    body: MessageBody,
 }
 
 impl Message {
@@ -36,10 +36,10 @@ impl Message {
 
 #[derive(Clone)]
 pub struct MessageBuilder {
+    body: MessageBody,
+    timestamp: u64,
     source: Node,
     destination: Node,
-    timestamp: u64,
-    body: MessageBody,
 }
 
 impl MessageBuilder {

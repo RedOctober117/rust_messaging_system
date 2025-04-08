@@ -1,261 +1,186 @@
-// use shared::message::{Message, MessageBody, Node};
-// use shared::user::User;
-// use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Result};
-// use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-// use tokio::net::TcpListener;
-// use tokio::sync::mpsc::Receiver;
-// use tokio::sync::{mpsc, oneshot};
+use std::{io::Result, net::IpAddr, sync::Arc};
 
-// use std::collections::HashMap;
-// use std::fmt::Display;
-// use std::net::IpAddr;
-// use std::sync::{Arc, Mutex};
+use shared::message::{Message, MessageBody, Node, Request, Response};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpListener, TcpStream,
+    },
+    sync::mpsc::{self, Receiver},
+};
 
-// // https://draft.ryhl.io/blog/actors-with-tokio/
-// // https://play.rust-lang.org/?version=stable&mode=debug&edition=2018&gist=1ebab17a7a2f00a1fc7f37c58992d612
+use crate::user_map::UserMap;
 
-// pub struct TcpOrchestrator {
-//     sessions: Arc<Mutex<HashMap<u16, TcpActorHandle>>>,
-//     addr: (IpAddr, u16),
-// }
+pub struct ServerSession {
+    user_map: Arc<UserMap>,
+    listener: TcpListener,
+}
 
-// impl TcpOrchestrator {
-//     pub fn new(addr: (IpAddr, u16)) -> Self {
-//         Self {
-//             sessions: Arc::new(Mutex::new(HashMap::new())),
-//             addr,
-//         }
-//     }
+impl ServerSession {
+    pub async fn new(addr: (IpAddr, u16)) -> Result<Self> {
+        match TcpListener::bind(addr).await {
+            Ok(l) => {
+                info!("Listening on {}:{}", addr.0, addr.1);
+                Ok(Self {
+                    user_map: UserMap::new(),
+                    listener: l,
+                })
+            }
+            Err(e) => {
+                error!("Could not open server at {addr:?}, {e}");
+                Err(e)
+            }
+        }
+    }
 
-//     pub fn add_session(
-//         &mut self,
-//         id: u16,
-//         r_owned: BufReader<OwnedReadHalf>,
-//         w_owned: BufWriter<OwnedWriteHalf>,
-//     ) {
-//         let mut session_lock = self.sessions.lock().unwrap();
-//         session_lock.insert(id, TcpActorHandle::new(r_owned, w_owned));
-//     }
+    pub async fn start(self) {
+        tokio::spawn(spawn_server_thread(Arc::clone(&self.user_map)));
 
-//     pub async fn process_loop(&mut self) -> Result<()> {
-//         let listener = TcpListener::bind(self.addr).await.unwrap();
+        while let Ok((conn, _)) = self.listener.accept().await {
+            tokio::spawn(handle_connection(Arc::clone(&self.user_map), conn));
+        }
+    }
+}
 
-//         let msg_template = Message::builder().source(Node::Server);
+async fn spawn_server_thread(users_handle: Arc<UserMap>) {
+    let (server_upstream, mut server_downstream) = mpsc::channel::<Message>(32);
 
-//         loop {
-//             let (incoming_stream, _) = listener.accept().await?;
+    users_handle.insert(0, server_upstream);
 
-//             let (r_owned, w_owned) = incoming_stream.into_split();
+    // spawn the server task to display received messages
+    while let Some(msg) = server_downstream.recv().await {
+        match msg.body() {
+            MessageBody::Request(req) => match req {
+                Request::ReqUserID => todo!(),
+                Request::Authenticate(_) => trace!(
+                    "Server received authentication request from {:?}",
+                    msg.source()
+                ),
+                Request::Echo(t) => {
+                    let payload = Message::builder()
+                        .source(Node::Server)
+                        .destination(msg.source())
+                        .body(MessageBody::Response(Response::Echo(t.to_owned())))
+                        .timestamp()
+                        .unwrap()
+                        .build();
 
-//             let mut init_reader = BufReader::new(r_owned);
-//             let mut init_writer = BufWriter::new(w_owned);
+                    warn!("Attempting echo to user {}", msg.source().unwrap());
 
-//             let received = init_reader.fill_buf().await?.to_vec();
+                    match users_handle.get(msg.source().unwrap()) {
+                        Some(upstream) => {
+                            _ = upstream.send(payload).await;
+                            info!("Echoed {t:?}\n");
+                        }
+                        None => todo!(),
+                    }
+                }
+                Request::Ping => {
+                    let time_received = msg.timestamp();
 
-//             match serde_json::from_slice::<Message>(&received) {
-//                 Ok(m) => match m.body() {
-//                     MessageBody::Request(shared::message::Request::Authenticate(u)) => {
-//                         info!("RECEIVED: {:?}", m);
-//                         if self.authenticate_user(u) {
-//                             info!("AUTHENTICATED USER: {}", u.id());
-//                             self.add_session(u.id(), init_reader, init_writer);
+                    let payload = Message::builder()
+                        .source(Node::Server)
+                        .destination(msg.source())
+                        .body(MessageBody::Response(Response::Ping(time_received)))
+                        .timestamp()
+                        .unwrap()
+                        .build();
 
-//                             let mut session_lock = self.sessions.lock().unwrap();
-//                             let handle = session_lock.get_mut(&u.id()).unwrap();
-//                             _ = handle
-//                                 .forward_message(
-//                                     msg_template
-//                                         .clone()
-//                                         .destination(Node::UserID(u.id()))
-//                                         .body(MessageBody::Response(
-//                                             shared::message::Response::AuthSuccess,
-//                                         ))
-//                                         .timestamp()
-//                                         .unwrap()
-//                                         .build(),
-//                                 )
-//                                 .await;
-//                             tokio::spawn(async move { loop {} });
-//                         } else {
-//                             warn!("FAIL AUTHENTICATION: {}", u.id());
-//                             let msg_payload = msg_template
-//                                 .clone()
-//                                 .destination(Node::UserID(u.id()))
-//                                 .body(MessageBody::Response(
-//                                     shared::message::Response::AuthFailure,
-//                                 ))
-//                                 .timestamp()
-//                                 .unwrap()
-//                                 .build();
+                    warn!("Attempting return ping to user {}", msg.source().unwrap());
 
-//                             init_writer
-//                                 .write_all(&serde_json::to_vec(&msg_payload).unwrap())
-//                                 .await
-//                                 .unwrap();
+                    match users_handle.get(msg.source().unwrap()) {
+                        Some(upstream) => {
+                            _ = upstream.send(payload).await;
+                            info!("Returned ping to user {}\n", msg.source().unwrap());
+                        }
+                        None => todo!(),
+                    }
+                }
+            },
+            _ => trace!("Server received {:?}", msg),
+        }
+    }
+}
 
-//                             init_writer.flush().await.unwrap();
-//                         }
-//                     }
-//                     _ => todo!(),
-//                 },
-//                 Err(_) => todo!(),
-//             }
-//         }
-//     }
+async fn spawn_writer(mut downstream: Receiver<Message>, mut tx: OwnedWriteHalf) {
+    while let Some(msg) = downstream.recv().await {
+        let id = msg.destination();
 
-//     /// If user_id is present, fail authentication
-//     pub fn authenticate_user(&mut self, user: &User) -> bool {
-//         match self.sessions.lock() {
-//             Ok(lock) => !lock.contains_key(&user.id()),
-//             Err(e) => {
-//                 warn!("Error authenticating user: {e}");
-//                 false
-//             }
-//         }
-//     }
-// }
+        warn!("Attempting to write {:?} to {}", msg, id.unwrap());
 
-// // top level run fn to accept connections -> pas
+        tx.write_all(&serde_json::to_vec(&msg).unwrap())
+            .await
+            .unwrap();
 
-// pub struct TcpReaderActor {
-//     receiver: mpsc::Receiver<TcpActorMessage>,
-//     reader: BufReader<OwnedReadHalf>,
-// }
+        tx.flush().await.unwrap();
+        info!("Successfully wrote message to {}\n", id.unwrap());
+    }
+}
 
-// impl TcpReaderActor {
-//     pub fn new(receiver: Receiver<TcpActorMessage>, reader: BufReader<OwnedReadHalf>) -> Self {
-//         Self { receiver, reader }
-//     }
+async fn spawn_reader(users_handle: Arc<UserMap>, mut buf_reader: BufReader<OwnedReadHalf>) {
+    let mut received: Vec<u8>;
+    loop {
+        received = buf_reader.fill_buf().await.unwrap().to_vec();
+        if let Ok(msg) = serde_json::from_slice::<Message>(&received) {
+            trace!("Received {:?}", msg);
 
-//     pub async fn handle_message(&mut self, msg: TcpActorMessage) {
-//         match msg {
-//             TcpActorMessage::FillBuffer { return_addr } => {
-//                 if let Ok(bytes) = self.reader.fill_buf().await {
-//                     let received = bytes.to_vec();
-//                     self.reader.consume(received.len());
-//                     _ = return_addr.send(received);
-//                 }
-//             }
-//             _ => todo!(),
-//         }
-//     }
-// }
+            match msg.destination() {
+                shared::message::Node::UserID(id) => match users_handle.get(&id) {
+                    Some(upstream) => {
+                        warn!("Attempting to send message downstream to {id}");
+                        _ = {
+                            upstream.send(msg).await.unwrap();
+                            info!("Forwarded message to user id {id}\n");
+                        }
+                    }
+                    None => debug!("implement a response of 'user not found'\n"),
+                },
+                shared::message::Node::Server => {
+                    // let mut users_lock = users_handle.lock().await;
+                    match users_handle.get(&0) {
+                        Some(upstream) => {
+                            warn!("Attempting to send message downstream to server");
+                            _ = {
+                                upstream.send(msg).await.unwrap();
+                                info!("Forwarded message to server\n");
+                            }
+                        }
+                        None => todo!(),
+                    }
+                }
+            }
+        }
+        buf_reader.consume(received.len());
+    }
+}
 
-// pub struct TcpWriterActor {
-//     receiver: mpsc::Receiver<TcpActorMessage>,
-//     writer: BufWriter<OwnedWriteHalf>,
-// }
+async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
+    let (rx, tx) = conn.into_split();
 
-// impl TcpWriterActor {
-//     pub fn new(receiver: Receiver<TcpActorMessage>, writer: BufWriter<OwnedWriteHalf>) -> Self {
-//         Self { receiver, writer }
-//     }
+    let mut buf_reader = BufReader::new(rx);
+    let auth = buf_reader.fill_buf().await.unwrap().to_vec();
+    buf_reader.consume(auth.len());
 
-//     pub async fn handle_message(&mut self, msg: TcpActorMessage) {
-//         match msg {
-//             TcpActorMessage::Forward {
-//                 return_addr,
-//                 message,
-//             } => {
-//                 match self
-//                     .writer
-//                     .write_all(&serde_json::to_vec(&message).unwrap())
-//                     .await
-//                 {
-//                     Ok(_) => _ = return_addr.send(Response::Success),
-//                     Err(_) => _ = return_addr.send(Response::Failure),
-//                 };
+    let user_id = match serde_json::from_slice::<Message>(&auth).unwrap().source() {
+        shared::message::Node::UserID(i) => {
+            trace!("Received connection from {i}\n");
+            i
+        }
+        shared::message::Node::Server => {
+            error!("Server cannot receive connections from another server\n");
+            return;
+        }
+    };
 
-//                 self.writer.flush().await.unwrap();
-//             }
-//             TcpActorMessage::FillBuffer { return_addr } => todo!(),
-//         }
-//     }
-// }
+    let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
-// pub struct TcpActorHandle {
-//     r_sender: mpsc::Sender<TcpActorMessage>,
-//     w_sender: mpsc::Sender<TcpActorMessage>,
-// }
+    users_handle.insert(user_id, w_upstream);
+    trace!("Inserted user to hashmap\n");
 
-// impl TcpActorHandle {
-//     pub fn new(r_owned: BufReader<OwnedReadHalf>, w_owned: BufWriter<OwnedWriteHalf>) -> Self {
-//         let (r_sender, r_receiver) = mpsc::channel(8);
-//         let (w_sender, w_receiver) = mpsc::channel(8);
+    // spawn a thread that auto sends any messages it receives from unstream to the ownedreadhalf
+    tokio::spawn(spawn_writer(w_downstream, tx));
 
-//         let mut r_actor = TcpReaderActor::new(r_receiver, r_owned);
-//         let mut w_actor = TcpWriterActor::new(w_receiver, w_owned);
-
-//         tokio::spawn(async move {
-//             while let Some(msg) = r_actor.receiver.recv().await {
-//                 r_actor.handle_message(msg).await;
-//             }
-//         });
-
-//         tokio::spawn(async move {
-//             while let Some(msg) = w_actor.receiver.recv().await {
-//                 w_actor.handle_message(msg).await;
-//             }
-//         });
-
-//         Self { r_sender, w_sender }
-//     }
-
-//     pub async fn forward_message(
-//         &mut self,
-//         msg: Message,
-//     ) -> std::result::Result<Response, oneshot::error::RecvError> {
-//         let (send, recv) = oneshot::channel();
-//         let payload = TcpActorMessage::Forward {
-//             return_addr: send,
-//             message: msg,
-//         };
-
-//         let _ = self.w_sender.send(payload).await;
-//         recv.await
-//     }
-
-//     pub async fn fill_buf(&mut self) -> std::result::Result<Vec<u8>, oneshot::error::RecvError> {
-//         let (send, recv) = oneshot::channel();
-//         let payload = TcpActorMessage::FillBuffer { return_addr: send };
-
-//         let _ = self.r_sender.send(payload).await;
-//         recv.await
-//     }
-// }
-
-// pub enum TcpActorMessage {
-//     Forward {
-//         //                           type of data to return
-//         return_addr: oneshot::Sender<Response>,
-//         message: Message,
-//     },
-
-//     FillBuffer {
-//         return_addr: oneshot::Sender<Vec<u8>>,
-//     },
-// }
-
-// pub enum Request {}
-
-// pub enum Response {
-//     Failure,
-//     Success,
-// }
-
-// #[derive(Debug, Clone)]
-// pub enum AuthenticationError {
-//     UserAlreadyPresent,
-//     InvalidPassword,
-// }
-
-// impl std::error::Error for AuthenticationError {}
-
-// impl Display for AuthenticationError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             AuthenticationError::InvalidPassword => write!(f, "Invalid password."),
-//             AuthenticationError::UserAlreadyPresent => write!(f, "User is already present."),
-//         }
-//     }
-// }
+    // spawn a thread to auto forward messages to the appropriate upstreams in the hashmap
+    tokio::spawn(spawn_reader(users_handle, buf_reader));
+}
