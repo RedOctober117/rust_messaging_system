@@ -1,9 +1,6 @@
 use std::{io::Result, net::IpAddr, sync::Arc};
 
-use shared::{
-    message::{Message, MessageBody, Node, Request, Response},
-    user::{self, User},
-};
+use shared::message::{Message, MessageBody, Node, Request, Response};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{
@@ -14,9 +11,6 @@ use tokio::{
 };
 
 use crate::user_map::UserMap;
-
-const SERVER_ID: u16 = 0;
-const SERVER_NAME: &'static str = "Server";
 
 pub struct ServerSession {
     user_map: Arc<UserMap>,
@@ -93,7 +87,7 @@ async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
                     None => todo!(),
                 }
             }
-            Request::Connect(user) => todo!(),
+            Request::Connect => todo!(),
         },
         _ => trace!("Server received {:?}", msg),
     }
@@ -161,10 +155,11 @@ async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
     let incoming_msg = serde_json::from_slice::<Message>(&auth).unwrap();
     trace!("Received connection request: {incoming_msg}\n");
 
-    if let MessageBody::Request(Request::Connect(user)) = incoming_msg.body() {
+    if let MessageBody::Request(Request::Connect) = incoming_msg.body() {
+        let user = incoming_msg.source();
         let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
-        if !users_handle.contains_key(user) {
+        if !users_handle.contains_key(&user) {
             users_handle.insert(user.to_owned(), w_upstream);
             trace!("Inserted {user} to hashmap\n");
 

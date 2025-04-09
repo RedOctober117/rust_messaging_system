@@ -136,7 +136,7 @@ impl Display for MessageBody {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Request {
     UserId,
-    Connect(Node),
+    Connect,
     Echo(Vec<u8>),
     Ping,
 }

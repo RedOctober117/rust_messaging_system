@@ -1,4 +1,4 @@
-use shared::message::{Message, MessageBody, MessageBuilder, Node, Response};
+use shared::message::{Message, MessageBody, MessageBuilder, Node};
 use shared::user::User;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
@@ -23,8 +23,6 @@ async fn main() -> Result<()> {
     let mut buf_reader: BufReader<OwnedReadHalf>;
     let mut buf_writer: BufWriter<OwnedWriteHalf>;
 
-    let user = User::new(1, "test");
-
     loop {
         if let Ok(s) = TcpStream::connect(server_addr).await {
             (reader, writer) = s.into_split();
@@ -46,14 +44,13 @@ async fn main() -> Result<()> {
                     Ok(m) => {
                         info!("RECEIVED: {:?}", m);
                         match m.body() {
-                            MessageBody::Text(_) => todo!(),
                             MessageBody::File(_) => todo!(),
-                            MessageBody::User(_) => todo!(),
-                            MessageBody::Request(_) => todo!(),
                             MessageBody::Response(response) => match response {
-                                Response::UserID(_) => todo!(),
-                                Response::Echo(t) => info!("Server echoed {t:?}"),
-                                Response::Ping(t) => {
+                                shared::message::Response::UserID(_) => todo!(),
+                                shared::message::Response::ConnectSuccess => todo!(),
+                                shared::message::Response::ConnectFail => todo!(),
+                                shared::message::Response::Echo(t) => info!("Server echoed {t:?}"),
+                                shared::message::Response::Ping(t) => {
                                     let time_to_server = m.timestamp() - t;
                                     let time_from_server =
                                         MessageBuilder::now().unwrap() - m.timestamp();
@@ -62,9 +59,10 @@ async fn main() -> Result<()> {
                                         time_to_server, time_from_server
                                     );
                                 }
-                                Response::ConnectSuccess => todo!(),
-                                Response::ConnectFail => todo!(),
                             },
+                            MessageBody::Text(_) => todo!(),
+                            MessageBody::User(user) => todo!(),
+                            MessageBody::Request(request) => todo!(),
                         }
                     }
                     Err(e) => warn!("Could not parse buffer, {e}"),
@@ -76,15 +74,15 @@ async fn main() -> Result<()> {
     });
 
     let writer_handle = tokio::spawn(async move {
+        let user = User::new(1, "test");
+
         let msg_template = MessageBuilder::new()
-            .source(Node::User(user.clone()))
+            .source(Node::User(user))
             .destination(Node::Server);
 
         let auth = msg_template
             .clone()
-            .body(MessageBody::Request(shared::message::Request::Connect(
-                user,
-            )))
+            .body(MessageBody::Request(shared::message::Request::Connect))
             .timestamp()
             .unwrap()
             .build();
