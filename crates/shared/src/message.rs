@@ -1,4 +1,7 @@
-use std::time::{SystemTime, SystemTimeError};
+use std::{
+    fmt::Display,
+    time::{SystemTime, SystemTimeError},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,15 +25,25 @@ impl Message {
     }
 
     pub fn destination(&self) -> Node {
-        self.destination
+        self.destination.clone()
     }
 
     pub fn source(&self) -> Node {
-        self.source
+        self.source.clone()
     }
 
     pub fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+}
+
+impl Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ {{ Source: {} }}, {{ Destination: {} }}, {{ Body: {} }}, {{ Timestamp: {} }} }}",
+            self.source, self.destination, self.body, self.timestamp
+        )
     }
 }
 
@@ -45,8 +58,8 @@ pub struct MessageBuilder {
 impl MessageBuilder {
     pub fn new() -> Self {
         Self {
-            source: Node::Server,
-            destination: Node::Server,
+            source: Node::NoNode,
+            destination: Node::NoNode,
             timestamp: 0,
             body: MessageBody::Text("".into()),
         }
@@ -80,8 +93,8 @@ impl MessageBuilder {
 
     pub fn build(&self) -> Message {
         Message {
-            source: self.source,
-            destination: self.destination,
+            source: self.source.clone(),
+            destination: self.destination.clone(),
             timestamp: self.timestamp,
             body: self.body.to_owned(),
         }
@@ -91,8 +104,8 @@ impl MessageBuilder {
 impl Default for MessageBuilder {
     fn default() -> Self {
         Self {
-            source: Node::Server,
-            destination: Node::Server,
+            source: Node::NoNode,
+            destination: Node::NoNode,
             timestamp: 0,
             body: MessageBody::Text("".into()),
         }
@@ -104,15 +117,26 @@ pub enum MessageBody {
     Text(String),
     File(Vec<u8>),
     User(User),
-    Failure(String),
     Request(Request),
     Response(Response),
 }
 
+impl Display for MessageBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageBody::Text(t) => write!(f, "{{ Text: {t} }}"),
+            MessageBody::File(_) => write!(f, "{{ <file> }}"),
+            MessageBody::User(user) => write!(f, "{{ User: {user} }}"),
+            MessageBody::Request(request) => write!(f, "{{ Request: {request:?} }}"),
+            MessageBody::Response(response) => write!(f, "{{ Response: {response:?} }}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Request {
-    ReqUserID,
-    Authenticate(User),
+    UserId,
+    Connect(Node),
     Echo(Vec<u8>),
     Ping,
 }
@@ -120,23 +144,34 @@ pub enum Request {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Response {
     UserID(u16),
-    AuthSuccess,
-    AuthFailure,
+    ConnectSuccess,
+    ConnectFail,
     Echo(Vec<u8>),
     Ping(u64),
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, Eq)]
 pub enum Node {
     Server,
-    UserID(u16),
+    User(User),
+    NoNode,
 }
 
-impl Node {
-    pub fn unwrap(&self) -> &u16 {
+impl Display for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Node::Server => &0,
-            Node::UserID(id) => id,
+            Node::Server => write!(f, "Server"),
+            Node::User(user) => write!(f, "{}", user),
+            Node::NoNode => write!(f, "No Node"),
+        }
+    }
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::User(l0), Self::User(r0)) => l0 == r0,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
 }

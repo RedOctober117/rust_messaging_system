@@ -1,4 +1,4 @@
-use shared::message::{Message, MessageBody, MessageBuilder, Node};
+use shared::message::{Message, MessageBody, MessageBuilder, Node, Response};
 use shared::user::User;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
@@ -22,6 +22,8 @@ async fn main() -> Result<()> {
 
     let mut buf_reader: BufReader<OwnedReadHalf>;
     let mut buf_writer: BufWriter<OwnedWriteHalf>;
+
+    let user = User::new(1, "test");
 
     loop {
         if let Ok(s) = TcpStream::connect(server_addr).await {
@@ -47,14 +49,11 @@ async fn main() -> Result<()> {
                             MessageBody::Text(_) => todo!(),
                             MessageBody::File(_) => todo!(),
                             MessageBody::User(_) => todo!(),
-                            MessageBody::Failure(_) => todo!(),
                             MessageBody::Request(_) => todo!(),
                             MessageBody::Response(response) => match response {
-                                shared::message::Response::UserID(_) => todo!(),
-                                shared::message::Response::AuthSuccess => todo!(),
-                                shared::message::Response::AuthFailure => todo!(),
-                                shared::message::Response::Echo(t) => info!("Server echoed {t:?}"),
-                                shared::message::Response::Ping(t) => {
+                                Response::UserID(_) => todo!(),
+                                Response::Echo(t) => info!("Server echoed {t:?}"),
+                                Response::Ping(t) => {
                                     let time_to_server = m.timestamp() - t;
                                     let time_from_server =
                                         MessageBuilder::now().unwrap() - m.timestamp();
@@ -63,6 +62,8 @@ async fn main() -> Result<()> {
                                         time_to_server, time_from_server
                                     );
                                 }
+                                Response::ConnectSuccess => todo!(),
+                                Response::ConnectFail => todo!(),
                             },
                         }
                     }
@@ -76,14 +77,14 @@ async fn main() -> Result<()> {
 
     let writer_handle = tokio::spawn(async move {
         let msg_template = MessageBuilder::new()
-            .source(Node::UserID(1))
+            .source(Node::User(user.clone()))
             .destination(Node::Server);
 
         let auth = msg_template
             .clone()
-            .body(MessageBody::Request(
-                shared::message::Request::Authenticate(User::new(1, "test".into(), server_addr)),
-            ))
+            .body(MessageBody::Request(shared::message::Request::Connect(
+                user,
+            )))
             .timestamp()
             .unwrap()
             .build();

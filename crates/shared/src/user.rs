@@ -1,16 +1,19 @@
-use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::fmt::Display;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, Eq, Ord)]
 pub struct User {
     id: u16,
     name: String,
-    location: (IpAddr, u16),
 }
 
 impl User {
-    pub fn new(id: u16, name: String, location: (IpAddr, u16)) -> Self {
-        Self { id, name, location }
+    pub fn new<S: Into<String>>(id: u16, name: S) -> Self {
+        Self {
+            id,
+            name: name.into(),
+        }
     }
 
     pub fn as_json(&self) -> Result<String, serde_json::Error> {
@@ -21,7 +24,33 @@ impl User {
         self.id
     }
 
-    pub fn location(&self) -> (IpAddr, u16) {
-        self.location
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
+impl PartialEq for User {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl PartialOrd for User {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.id.partial_cmp(&other.id) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self.name.partial_cmp(&other.name)
+    }
+}
+
+impl Display for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ ID: {{ {} }}, Username: {{ {}}} }}",
+            self.id, self.name
+        )
     }
 }

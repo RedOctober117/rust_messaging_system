@@ -3,11 +3,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use shared::{message::Message, user::User};
+use shared::message::{Message, Node};
 use tokio::sync::mpsc::Sender;
 
 pub struct UserMap {
-    upstream_map: Mutex<HashMap<User, Sender<Message>>>,
+    upstream_map: Mutex<HashMap<Node, Sender<Message>>>,
 }
 
 impl UserMap {
@@ -17,16 +17,21 @@ impl UserMap {
         })
     }
 
-    pub fn insert(&self, id: User, upstream: Sender<Message>) -> Option<Sender<Message>> {
+    pub fn insert(&self, id: Node, upstream: Sender<Message>) -> Option<Sender<Message>> {
         let mut lock = self.upstream_map.lock().unwrap();
         lock.insert(id, upstream)
     }
 
-    pub fn get(&self, id: &User) -> Option<Sender<Message>> {
+    pub fn get(&self, id: &Node) -> Option<Sender<Message>> {
         let lock = self.upstream_map.lock().unwrap();
         match lock.get(&id) {
             Some(upstream) => Some(upstream.clone()),
             None => None,
         }
+    }
+
+    pub fn contains_key(&self, id: &Node) -> bool {
+        let lock = self.upstream_map.lock().unwrap();
+        lock.contains_key(id)
     }
 }

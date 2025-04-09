@@ -1,8 +1,8 @@
 use std::{io::Result, net::IpAddr, sync::Arc};
 
 use shared::{
-    message::{Message, MessageBody, Request, Response},
-    user::User,
+    message::{Message, MessageBody, Node, Request, Response},
+    user::{self, User},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -55,7 +55,7 @@ async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
             Request::UserId => todo!(),
             Request::Echo(t) => {
                 let payload = Message::builder()
-                    .source(User::new(SERVER_ID, SERVER_NAME))
+                    .source(Node::Server)
                     .destination(msg.source().to_owned())
                     .body(MessageBody::Response(Response::Echo(t.to_owned())))
                     .timestamp()
@@ -76,7 +76,7 @@ async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
                 let time_received = msg.timestamp();
 
                 let payload = Message::builder()
-                    .source(User::new(SERVER_ID, SERVER_NAME))
+                    .source(Node::Server)
                     .destination(msg.source())
                     .body(MessageBody::Response(Response::Ping(time_received)))
                     .timestamp()
@@ -102,7 +102,7 @@ async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
 async fn spawn_server_thread(users_handle: Arc<UserMap>) {
     let (server_upstream, mut server_downstream) = mpsc::channel::<Message>(32);
 
-    users_handle.insert(User::new(0, "Server"), server_upstream);
+    users_handle.insert(Node::Server, server_upstream);
 
     // spawn the server task to display received messages
     while let Some(msg) = server_downstream.recv().await {
@@ -134,11 +134,14 @@ async fn spawn_reader(users_handle: Arc<UserMap>, mut buf_reader: BufReader<Owne
 
             match users_handle.get(&msg.destination()) {
                 Some(upstream) => {
-                    let id = msg.destination().id();
-                    warn!("Attempting to send message downstream to {id}",);
-                    _ = {
-                        upstream.send(msg).await.unwrap();
-                        info!("Forwarded message to user id {id}\n");
+                    if let Node::User(user) = msg.destination() {
+                        warn!("Attempting to send message downstream to {}", user.id());
+                        _ = {
+                            upstream.send(msg).await.unwrap();
+                            info!("Forwarded message to user id {}\n", user.id());
+                        }
+                    } else {
+                        warn!("Message received by invalid downstream: {}", msg,);
                     }
                 }
                 None => debug!("implement a response of 'user not found'\n"),
@@ -149,23 +152,41 @@ async fn spawn_reader(users_handle: Arc<UserMap>, mut buf_reader: BufReader<Owne
 }
 
 async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
-    let (rx, tx) = conn.into_split();
+    let (rx, mut tx) = conn.into_split();
 
     let mut buf_reader = BufReader::new(rx);
     let auth = buf_reader.fill_buf().await.unwrap().to_vec();
     buf_reader.consume(auth.len());
 
-    let user_id = serde_json::from_slice::<Message>(&auth).unwrap().source();
-    trace!("Received connection from {user_id}\n");
+    let incoming_msg = serde_json::from_slice::<Message>(&auth).unwrap();
+    trace!("Received connection request: {incoming_msg}\n");
 
-    let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
+    if let MessageBody::Request(Request::Connect(user)) = incoming_msg.body() {
+        let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
-    users_handle.insert(user_id, w_upstream);
-    trace!("Inserted user to hashmap\n");
+        if !users_handle.contains_key(user) {
+            users_handle.insert(user.to_owned(), w_upstream);
+            trace!("Inserted {user} to hashmap\n");
 
-    // spawn a thread that auto sends any messages it receives from unstream to the ownedreadhalf
-    tokio::spawn(spawn_writer(w_downstream, tx));
+            // spawn a thread that auto sends any messages it receives from unstream to the ownedreadhalf
+            tokio::spawn(spawn_writer(w_downstream, tx));
 
-    // spawn a thread to auto forward messages to the appropriate upstreams in the hashmap
-    tokio::spawn(spawn_reader(users_handle, buf_reader));
+            // spawn a thread to auto forward messages to the appropriate upstreams in the hashmap
+            tokio::spawn(spawn_reader(users_handle, buf_reader));
+        } else {
+            let rejection_payload = Message::builder()
+                .source(Node::Server)
+                .destination(user.to_owned())
+                .body(MessageBody::Response(Response::ConnectFail))
+                .timestamp()
+                .unwrap()
+                .build();
+
+            tx.write_all(&serde_json::to_vec(&rejection_payload).unwrap())
+                .await
+                .unwrap();
+
+            tx.flush().await.unwrap();
+        }
+    }
 }
