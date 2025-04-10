@@ -27,6 +27,10 @@ impl User {
     pub fn name(&self) -> String {
         self.name.clone()
     }
+
+    pub fn format(&self) -> String {
+        format!("{}[{}]", self.name, self.id)
+    }
 }
 
 impl PartialEq for User {

@@ -68,7 +68,6 @@ async fn main() -> Result<()> {
     let template = Message::builder().source(user.clone());
 
     let (ingress_upstream, mut ingress_downstream) = mpsc::channel::<Message>(8);
-    // self.upstream = Some(ingress_upstream);
 
     tokio::spawn(async move {
         let mut counter = 0;
@@ -76,7 +75,6 @@ async fn main() -> Result<()> {
         while let Some(msg) = ingress_downstream.recv().await {
             counter = counter + 1;
             trace!("receiver alive for {} cycles", counter);
-            // trace!("buf_writer: {:?}", writer);
 
             warn!("Attempting to write {}", msg);
 
@@ -98,12 +96,10 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         let mut received: Vec<u8>;
         loop {
-            // trace!("buf_reader: {:?}", buf_reader);
-
             received = buf_reader.fill_buf().await.unwrap().to_vec();
             buf_reader.consume(received.len());
 
-            // trace!("RECEIVED RAW: {:?}", received);
+            trace!("RECEIVED RAW: {:?}", received);
             if received.len() > 0 {
                 if let Ok(m) = serde_json::from_slice::<Message>(&received) {
                     info!("RECEIVED PARSED: {:?}", m);
@@ -136,7 +132,7 @@ async fn main() -> Result<()> {
                             info!("Received \"{}\" from {}.", t, m.source());
                             if let Node::User(u) = m.source() {
                                 if let MessageBody::Text(t) = m.body() {
-                                    println!("\n{}({}): {}\n", u.name(), u.id(), t);
+                                    println!("{}: {}", u.format(), t);
                                 }
                             }
                         }
@@ -151,14 +147,6 @@ async fn main() -> Result<()> {
         }
     });
     trace!("Spawned ingress reader");
-
-    // loop {}
-    // tokio::spawn(spawn_client_interface(template, ingress_upstream));
-    // trace!("Spawned client interface");
-
-    // match ingress_upstream.send(auth_req.clone()).await {
-    //     Ok(_) => {
-    //         trace!("Sent connection req");
 
     let auth_req = template
         .clone()
@@ -181,9 +169,6 @@ async fn main() -> Result<()> {
             let mut received_message = String::new();
 
             loop {
-                // trace!("upstream: {:?}", cloned_upstream);
-                // let cloned_upstream = Arc::clone(&cloned_upstream);
-
                 print!("Destination ID: ");
                 std::io::stdout().flush().unwrap();
                 std::io::stdin().read_line(&mut received_id).unwrap();
@@ -228,13 +213,5 @@ async fn main() -> Result<()> {
         Err(e) => error!("Error establishing connection: {e}"),
     }
 
-    // let client = ClientSession::new(
-    //     u16::from_str_radix(&id.trim(), 10).unwrap(),
-    //     username,
-    //     CLIENT_ADDR,
-    // )
-    // .await;
-
-    // client.start().await
     Ok(())
 }
