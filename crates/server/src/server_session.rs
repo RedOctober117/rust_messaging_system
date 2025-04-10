@@ -117,7 +117,7 @@ async fn spawn_writer(mut downstream: Receiver<Message>, mut tx: OwnedWriteHalf)
 
         warn!("Attempting to write {} to {}", msg, id);
 
-        match tx.write_all(&serde_json::to_vec(&msg).unwrap()).await {
+        match tx.write(&serde_json::to_vec(&msg).unwrap()).await {
             Ok(_) => info!("Successfully wrote message to {}\n", id),
             Err(e) => error!("Error in writer: {e}"),
         }
@@ -200,7 +200,7 @@ async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
                 .unwrap()
                 .build();
 
-            tx.write_all(&serde_json::to_vec(&rejection_payload).unwrap())
+            tx.write(&serde_json::to_vec(&rejection_payload).unwrap())
                 .await
                 .unwrap();
 

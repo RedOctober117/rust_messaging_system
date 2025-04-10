@@ -1,11 +1,10 @@
-use std::clone;
 use std::io::Write;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::{io::Result, time::Duration};
 
 use shared::{
-    message::{Message, MessageBody, MessageBuilder, Node},
+    message::{Message, MessageBody, MessageBuilder, Node, Response},
     user::User,
 };
 use tokio::io::AsyncWriteExt;
@@ -77,6 +76,13 @@ async fn spawn_client_interface(
     ingress_upstream: Sender<Message>,
 ) {
     let cloned_upstream = Arc::new(ingress_upstream);
+    let cloned_upstream_2 = Arc::clone(&cloned_upstream);
+
+    tokio::spawn(async move {
+        loop {
+            println!("upstream status: {}", cloned_upstream_2.is_closed());
+        }
+    });
 
     let auth_req = message_template
         .clone()
@@ -86,16 +92,19 @@ async fn spawn_client_interface(
         .unwrap()
         .build();
 
+    trace!("Message to be sent downstream: {}", auth_req);
+
     trace!("Sending connection request...");
     match Arc::clone(&cloned_upstream).send(auth_req).await {
         Ok(_) => {
             trace!("Connection Established.");
+
             let mut received_id = String::new();
             let mut received_username = String::new();
             let mut received_message = String::new();
 
             loop {
-                trace!("upstream: {:?}", cloned_upstream);
+                // trace!("upstream: {:?}", cloned_upstream);
                 let cloned_upstream = Arc::clone(&cloned_upstream);
 
                 print!("Destination ID: ");
@@ -129,7 +138,7 @@ async fn spawn_client_interface(
                     .await
                 {
                     Ok(_) => info!("Sent message"),
-                    Err(e) => error!("Error sending message: {e}"),
+                    Err(e) => error!("Error sending message downstream: {e}"),
                 }
 
                 received_id.clear();
@@ -144,55 +153,59 @@ async fn spawn_client_interface(
 async fn spawn_ingress_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
     let mut received: Vec<u8>;
     loop {
-        trace!("buf_reader: {:?}", buf_reader);
+        // trace!("buf_reader: {:?}", buf_reader);
 
         received = buf_reader.fill_buf().await.unwrap().to_vec();
-        if received.len() > 0 {
-            match serde_json::from_slice::<Message>(&received) {
-                Ok(m) => {
-                    info!("RECEIVED: {:?}", m);
-                    match m.body() {
-                        MessageBody::File(_) => todo!(),
-                        MessageBody::Response(response) => match response {
-                            shared::message::Response::UserID(_) => todo!(),
-                            shared::message::Response::ConnectSuccess => {
-                                info!("Connection established successfully with server.");
-                            }
-                            shared::message::Response::ConnectFail => {
-                                warn!("Failed to establish connection with server.");
-                            }
-                            shared::message::Response::Echo(t) => info!("Server echoed {t:?}"),
-                            shared::message::Response::Ping(t) => {
-                                let time_to_server = m.timestamp() - t;
-                                let time_from_server =
-                                    MessageBuilder::now().unwrap() - m.timestamp();
-                                info!(
-                                    "Ping responded. Time to server: {}, Time from server: {}",
-                                    time_to_server, time_from_server
-                                );
-                            }
-                        },
-                        MessageBody::Text(t) => {
-                            info!("Received \"{}\" from {}.", t, m.source());
-                        }
-                        MessageBody::User(user) => todo!(),
-                        MessageBody::Request(request) => todo!(),
-                    }
-                }
-                Err(e) => warn!("Could not parse buffer, {e}"),
-            }
-        }
         buf_reader.consume(received.len());
+
+        if let Ok(m) = serde_json::from_slice::<Message>(&received) {
+            info!("RECEIVED: {:?}", m);
+            match m.body() {
+                MessageBody::File(_) => todo!(),
+                MessageBody::Response(response) => match response {
+                    Response::UserID(_) => todo!(),
+                    Response::ConnectSuccess => {
+                        info!("Connection established successfully with server.");
+                    }
+                    Response::ConnectFail => {
+                        warn!("Failed to establish connection with server.");
+                    }
+                    Response::Echo(t) => info!("Server echoed {t:?}"),
+                    Response::Ping(t) => {
+                        let time_to_server = m.timestamp() - t;
+                        let time_from_server = MessageBuilder::now().unwrap() - m.timestamp();
+                        info!(
+                            "Ping responded. Time to server: {}, Time from server: {}",
+                            time_to_server, time_from_server
+                        );
+                    }
+                },
+                MessageBody::Text(t) => {
+                    info!("Received \"{}\" from {}.", t, m.source());
+                }
+                MessageBody::User(_) => todo!(),
+                MessageBody::Request(_) => todo!(),
+            }
+        } else {
+            warn!("Could not parse buffer");
+        }
     }
 }
 
-async fn spawn_ingress_writer(mut downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
+async fn spawn_ingress_writer(downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
+    let mut counter = 0;
+    tokio::pin!(downstream);
     while let Some(msg) = downstream.recv().await {
+        counter = counter + 1;
+        trace!("receiver alive for {} cycles", counter);
         trace!("buf_writer: {:?}", writer);
 
         warn!("Attempting to write {}", msg);
 
-        match writer.write_all(&serde_json::to_vec(&msg).unwrap()).await {
+        match writer
+            .write_all(&serde_json::to_vec(&msg).expect("Failed to parse msg"))
+            .await
+        {
             Ok(_) => {
                 info!("Successfully wrote message.");
             }
@@ -202,3 +215,20 @@ async fn spawn_ingress_writer(mut downstream: Receiver<Message>, mut writer: Own
         writer.flush().await.unwrap();
     }
 }
+// while let Some(msg) = downstream.recv().await {
+//     trace!("buf_writer: {:?}", writer);
+
+//     warn!("Attempting to write {}", msg);
+
+//     match writer
+//         .write_all(&serde_json::to_vec(&msg).expect("Failed to parse msg"))
+//         .await
+//     {
+//         Ok(_) => {
+//             info!("Successfully wrote message.");
+//         }
+//         Err(e) => error!("Error in ingress writer: {e}"),
+//     }
+
+//     writer.flush().await.unwrap();
+// }
