@@ -46,7 +46,6 @@ impl ServerSession {
 async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
     match msg.body() {
         MessageBody::Request(req) => match req {
-            Request::UserId => todo!(),
             Request::Echo(t) => {
                 let payload = Message::builder()
                     .source(Node::Server)
@@ -126,10 +125,20 @@ async fn spawn_writer(mut downstream: Receiver<Message>, mut tx: OwnedWriteHalf)
     }
 }
 
-async fn spawn_reader(users_handle: Arc<UserMap>, mut buf_reader: BufReader<OwnedReadHalf>) {
+async fn spawn_reader(
+    users_handle: Arc<UserMap>,
+    mut buf_reader: BufReader<OwnedReadHalf>,
+    user: Node,
+) {
     let mut received: Vec<u8>;
     loop {
-        received = buf_reader.fill_buf().await.unwrap().to_vec();
+        if let Ok(r) = buf_reader.fill_buf().await {
+            received = r.to_vec();
+        } else {
+            warn!("Dropping user {}", user);
+            users_handle.remove(&user);
+            return;
+        }
         if let Ok(msg) = serde_json::from_slice::<Message>(&received) {
             trace!("Received {}", msg);
 
@@ -147,7 +156,24 @@ async fn spawn_reader(users_handle: Arc<UserMap>, mut buf_reader: BufReader<Owne
                     }
                     Node::NoNode => warn!("Message has no node specified.\n"),
                 },
-                None => debug!("implement a response of 'user not found'\n"),
+                None => {
+                    trace!("implement a response of 'user not found'\n");
+                    if let Some(upstream) = users_handle.get(&msg.source()) {
+                        _ = upstream
+                            .send(
+                                Message::builder()
+                                    .source(Node::Server)
+                                    .destination(msg.source())
+                                    .body(MessageBody::Response(Response::UserNotFound(
+                                        msg.destination(),
+                                    )))
+                                    .timestamp()
+                                    .unwrap()
+                                    .build(),
+                            )
+                            .await;
+                    }
+                }
             };
         }
         buf_reader.consume(received.len());
@@ -155,11 +181,14 @@ async fn spawn_reader(users_handle: Arc<UserMap>, mut buf_reader: BufReader<Owne
 }
 
 async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
+    trace!("Processing connection from {:?}", conn);
     let (rx, mut tx) = conn.into_split();
 
     let mut buf_reader = BufReader::new(rx);
     let auth = buf_reader.fill_buf().await.unwrap().to_vec();
     buf_reader.consume(auth.len());
+
+    trace!("Received {:?}", auth);
 
     let incoming_msg = serde_json::from_slice::<Message>(&auth).unwrap();
     trace!("Received connection request: {incoming_msg}\n");
@@ -184,7 +213,11 @@ async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
             tokio::spawn(spawn_writer(w_downstream, tx));
 
             // spawn a thread to auto forward messages to the appropriate upstreams in the hashmap
-            tokio::spawn(spawn_reader(Arc::clone(&users_handle), buf_reader));
+            tokio::spawn(spawn_reader(
+                Arc::clone(&users_handle),
+                buf_reader,
+                user.to_owned(),
+            ));
 
             match users_handle.get(&user) {
                 Some(u) => u.send(acceptance_payload).await.unwrap(),

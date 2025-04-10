@@ -135,7 +135,6 @@ impl Display for MessageBody {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Request {
-    UserId,
     Connect,
     Disconnect,
     Echo(Vec<u8>),
@@ -149,6 +148,7 @@ pub enum Response {
     ConnectFail,
     Echo(Vec<u8>),
     Ping(u64),
+    UserNotFound(Node),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Hash, Eq)]

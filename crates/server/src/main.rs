@@ -10,7 +10,7 @@ extern crate log;
 pub mod server_session;
 pub mod user_map;
 
-const SERVER_ADDR: (IpAddr, u16) = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5000);
+const SERVER_ADDR: (IpAddr, u16) = (IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 5000);
 
 #[tokio::main]
 async fn main() -> Result<()> {

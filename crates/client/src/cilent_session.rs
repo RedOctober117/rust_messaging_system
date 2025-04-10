@@ -20,27 +20,43 @@ use tokio::{
 
 pub struct ClientSession {
     user: Node,
-    listener: TcpStream,
+    server_addr: (IpAddr, u16), // listener: TcpStream,
 }
 
 impl ClientSession {
-    pub async fn new<S: Into<String>>(id: u16, username: S, addr: (IpAddr, u16)) -> Result<Self> {
-        loop {
-            warn!("Awaiting connection from server...");
-            if let Ok(s) = TcpStream::connect(addr).await {
-                info!("Connection successful.");
-                return Ok(Self {
-                    user: Node::User(User::new(id, username)),
-                    listener: s,
-                });
-            }
-
-            sleep(Duration::from_secs(1)).await;
+    pub async fn new<S: Into<String>>(id: u16, username: S, addr: (IpAddr, u16)) -> Self {
+        Self {
+            user: Node::User(User::new(id, username)),
+            server_addr: addr,
         }
+        // loop {
+        //     warn!("Awaiting connection from server...");
+        //     if let Ok(s) = TcpStream::connect(addr).await {
+        //         info!("Connection successful.");
+        //         return Ok(Self {
+        //             user: Node::User(User::new(id, username)),
+        //             listener: s,
+        //         });
+        //     }
+
+        // }
     }
 
-    pub async fn start(self) {
-        let (reader, writer): (OwnedReadHalf, OwnedWriteHalf) = self.listener.into_split();
+    pub async fn start(self) -> Result<()> {
+        let stream: TcpStream;
+
+        loop {
+            trace!("Awaiting connection from server...");
+            if let Ok(conn) = TcpStream::connect(self.server_addr).await {
+                stream = conn;
+                trace!("Established connection with server!");
+                break;
+            } else {
+                sleep(Duration::from_secs(1)).await;
+            }
+        }
+
+        let (reader, writer) = stream.into_split();
         trace!("Split stream");
 
         let buf_reader = BufReader::new(reader);
@@ -56,14 +72,17 @@ impl ClientSession {
         tokio::spawn(spawn_ingress_reader(buf_reader));
         trace!("Spawned ingress reader");
 
-        tokio::spawn(spawn_client_interface(template, ingress_upstream));
-        trace!("Spawned client interface");
+        // loop {}
+        // tokio::spawn(spawn_client_interface(template, ingress_upstream));
+        // trace!("Spawned client interface");
 
         // match ingress_upstream.send(auth_req.clone()).await {
         //     Ok(_) => {
         //         trace!("Sent connection req");
 
-        //         tokio::spawn(spawn_client_interface(template.clone(), ingress_upstream));
+        spawn_client_interface(template.clone(), ingress_upstream);
+
+        Ok(())
         //         trace!("Spawned client interface");
         //     }
         //     Err(e) => error!("error at line 73 {e}"),
@@ -71,18 +90,15 @@ impl ClientSession {
     }
 }
 
-async fn spawn_client_interface(
-    message_template: MessageBuilder,
-    ingress_upstream: Sender<Message>,
-) {
+pub fn spawn_client_interface(message_template: MessageBuilder, ingress_upstream: Sender<Message>) {
     let cloned_upstream = Arc::new(ingress_upstream);
-    let cloned_upstream_2 = Arc::clone(&cloned_upstream);
+    // let cloned_upstream_2 = Arc::clone(&cloned_upstream);
 
-    tokio::spawn(async move {
-        loop {
-            println!("upstream status: {}", cloned_upstream_2.is_closed());
-        }
-    });
+    // tokio::spawn(async move {
+    //     loop {
+    //         println!("upstream status: {}", cloned_upstream_2.is_closed());
+    //     }
+    // });
 
     let auth_req = message_template
         .clone()
@@ -95,62 +111,68 @@ async fn spawn_client_interface(
     trace!("Message to be sent downstream: {}", auth_req);
 
     trace!("Sending connection request...");
-    match Arc::clone(&cloned_upstream).send(auth_req).await {
-        Ok(_) => {
-            trace!("Connection Established.");
 
-            let mut received_id = String::new();
-            let mut received_username = String::new();
-            let mut received_message = String::new();
+    tokio::spawn(async move {
+        match cloned_upstream.clone().send(auth_req).await {
+            Ok(_) => {
+                trace!("Connection Established.");
 
-            loop {
-                // trace!("upstream: {:?}", cloned_upstream);
-                let cloned_upstream = Arc::clone(&cloned_upstream);
+                let mut received_id = String::new();
+                let mut received_username = String::new();
+                let mut received_message = String::new();
 
-                print!("Destination ID: ");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin().read_line(&mut received_id).unwrap();
+                loop {
+                    // trace!("upstream: {:?}", cloned_upstream);
+                    // let cloned_upstream = Arc::clone(&cloned_upstream);
 
-                print!("Destination Username: ");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin().read_line(&mut received_username).unwrap();
+                    print!("Destination ID: ");
+                    std::io::stdout().flush().unwrap();
+                    std::io::stdin().read_line(&mut received_id).unwrap();
 
-                let dest_node = Node::User(User::new(
-                    u16::from_str_radix(&received_id.trim(), 10).unwrap(),
-                    &received_username,
-                ));
+                    print!("Destination Username: ");
+                    std::io::stdout().flush().unwrap();
+                    std::io::stdin().read_line(&mut received_username).unwrap();
 
-                print!("Message: ");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin().read_line(&mut received_message).unwrap();
-                let payload = MessageBody::Text(received_message.clone());
+                    let dest_node = Node::User(User::new(
+                        u16::from_str_radix(&received_id.trim(), 10).unwrap(),
+                        &received_username,
+                    ));
 
-                match cloned_upstream
-                    .send(
-                        message_template
-                            .clone()
-                            .body(payload)
-                            .destination(dest_node)
-                            .timestamp()
-                            .unwrap()
-                            .build(),
-                    )
-                    .await
-                {
-                    Ok(_) => info!("Sent message"),
-                    Err(e) => error!("Error sending message downstream: {e}"),
+                    print!("Message: ");
+                    std::io::stdout().flush().unwrap();
+                    std::io::stdin().read_line(&mut received_message).unwrap();
+                    let payload = MessageBody::Text(received_message.clone());
+
+                    let sender_clone = Arc::clone(&cloned_upstream);
+                    let template_clone = message_template.clone();
+                    tokio::spawn(async move {
+                        match sender_clone
+                            .send(
+                                template_clone
+                                    .body(payload)
+                                    .destination(dest_node)
+                                    .timestamp()
+                                    .unwrap()
+                                    .build(),
+                            )
+                            .await
+                        {
+                            Ok(_) => info!("Sent message"),
+                            Err(e) => error!("Error sending message downstream: {e}"),
+                        }
+                    });
+
+                    received_id.clear();
+                    received_username.clear();
+                    received_message.clear();
                 }
-
-                received_id.clear();
-                received_username.clear();
-                received_message.clear();
             }
+            Err(e) => error!("Error establishing connection: {e}"),
         }
-        Err(e) => error!("Error establishing connection: {e}"),
-    }
+    });
 }
 
-async fn spawn_ingress_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
+pub async fn spawn_ingress_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
     let mut received: Vec<u8>;
     loop {
         // trace!("buf_reader: {:?}", buf_reader);
@@ -160,41 +182,41 @@ async fn spawn_ingress_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
 
         if let Ok(m) = serde_json::from_slice::<Message>(&received) {
             info!("RECEIVED: {:?}", m);
-            match m.body() {
-                MessageBody::File(_) => todo!(),
-                MessageBody::Response(response) => match response {
-                    Response::UserID(_) => todo!(),
-                    Response::ConnectSuccess => {
-                        info!("Connection established successfully with server.");
-                    }
-                    Response::ConnectFail => {
-                        warn!("Failed to establish connection with server.");
-                    }
-                    Response::Echo(t) => info!("Server echoed {t:?}"),
-                    Response::Ping(t) => {
-                        let time_to_server = m.timestamp() - t;
-                        let time_from_server = MessageBuilder::now().unwrap() - m.timestamp();
-                        info!(
-                            "Ping responded. Time to server: {}, Time from server: {}",
-                            time_to_server, time_from_server
-                        );
-                    }
-                },
-                MessageBody::Text(t) => {
-                    info!("Received \"{}\" from {}.", t, m.source());
-                }
-                MessageBody::User(_) => todo!(),
-                MessageBody::Request(_) => todo!(),
-            }
+            // match m.body() {
+            //     MessageBody::File(_) => todo!(),
+            //     MessageBody::Response(response) => match response {
+            //         Response::UserID(_) => todo!(),
+            //         Response::ConnectSuccess => {
+            //             info!("Connection established successfully with server.");
+            //         }
+            //         Response::ConnectFail => {
+            //             warn!("Failed to establish connection with server.");
+            //         }
+            //         Response::Echo(t) => info!("Server echoed {t:?}"),
+            //         Response::Ping(t) => {
+            //             let time_to_server = m.timestamp() - t;
+            //             let time_from_server = MessageBuilder::now().unwrap() - m.timestamp();
+            //             info!(
+            //                 "Ping responded. Time to server: {}, Time from server: {}",
+            //                 time_to_server, time_from_server
+            //             );
+            //         }
+            //     },
+            //     MessageBody::Text(t) => {
+            //         info!("Received \"{}\" from {}.", t, m.source());
+            //     }
+            //     MessageBody::User(_) => todo!(),
+            //     MessageBody::Request(_) => todo!(),
+            // }
         } else {
             warn!("Could not parse buffer");
         }
     }
 }
 
-async fn spawn_ingress_writer(downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
+pub async fn spawn_ingress_writer(mut downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
     let mut counter = 0;
-    tokio::pin!(downstream);
+
     while let Some(msg) = downstream.recv().await {
         counter = counter + 1;
         trace!("receiver alive for {} cycles", counter);
