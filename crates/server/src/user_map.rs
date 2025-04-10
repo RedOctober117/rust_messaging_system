@@ -34,4 +34,9 @@ impl UserMap {
         let lock = self.upstream_map.lock().unwrap();
         lock.contains_key(id)
     }
+
+    pub fn remove(&self, id: &Node) -> Option<Sender<Message>> {
+        let mut lock = self.upstream_map.lock().unwrap();
+        lock.remove(id)
+    }
 }

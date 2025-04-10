@@ -137,6 +137,7 @@ impl Display for MessageBody {
 pub enum Request {
     UserId,
     Connect,
+    Disconnect,
     Echo(Vec<u8>),
     Ping,
 }
