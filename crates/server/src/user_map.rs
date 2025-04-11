@@ -24,10 +24,7 @@ impl UserMap {
 
     pub fn get(&self, id: &Node) -> Option<Sender<Message>> {
         let lock = self.upstream_map.lock().unwrap();
-        match lock.get(&id) {
-            Some(upstream) => Some(upstream.clone()),
-            None => None,
-        }
+        lock.get(id).cloned()
     }
 
     pub fn contains_key(&self, id: &Node) -> bool {

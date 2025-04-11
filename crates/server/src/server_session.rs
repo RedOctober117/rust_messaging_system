@@ -146,10 +146,10 @@ async fn spawn_reader(
                 Some(upstream) => match msg.destination() {
                     Node::User(user) => {
                         warn!("Attempting to send message downstream to {}", user.id());
-                        _ = {
+                        {
                             upstream.send(msg).await.unwrap();
                             info!("Forwarded message to user id {}\n", user.id());
-                        }
+                        };
                     }
                     Node::Server => {
                         warn!("Server received {}\n", msg,);
@@ -233,7 +233,7 @@ async fn handle_connection(users_handle: Arc<UserMap>, conn: TcpStream) {
                 .unwrap()
                 .build();
 
-            tx.write(&serde_json::to_vec(&rejection_payload).unwrap())
+            tx.write_all(&serde_json::to_vec(&rejection_payload).unwrap())
                 .await
                 .unwrap();
 

@@ -151,7 +151,7 @@ pub enum Response {
     UserNotFound(Node),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Hash, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Node {
     Server,
     User(User),
@@ -168,14 +168,14 @@ impl Display for Node {
     }
 }
 
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::User(l0), Self::User(r0)) => l0 == r0,
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
-    }
-}
+// impl PartialEq for Node {
+//     fn eq(&self, other: &Self) -> bool {
+//         match (self, other) {
+//             (Self::User(l0), Self::User(r0)) => l0 == r0,
+//             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+//         }
+//     }
+// }
 
 // pub fn as_netstring(mut self) -> Result<String, serde_json::Error> {
 //     let serialized_message = self.as_json()?;
