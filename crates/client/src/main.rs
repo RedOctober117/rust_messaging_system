@@ -29,7 +29,7 @@ fn gather_ip() -> Result<Ipv4Addr> {
         std::io::stdout().flush()?;
         std::io::stdin().read_line(&mut buffer)?;
 
-        if let Ok(ip) = buffer.parse::<Ipv4Addr>() {
+        if let Ok(ip) = buffer.trim().parse::<Ipv4Addr>() {
             return Ok(ip);
         }
     }
