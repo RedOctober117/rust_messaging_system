@@ -1,4 +1,4 @@
-use cilent_session::ClientSession;
+use client_session::ClientSession;
 use shared::{message::Node, user::User};
 use std::io::Result;
 use std::io::Write;
@@ -8,7 +8,7 @@ extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
 
-pub mod cilent_session;
+pub mod client_session;
 
 #[tokio::main]
 async fn main() -> Result<()> {

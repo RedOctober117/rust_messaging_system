@@ -181,11 +181,10 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
                 println!();
                 let payload = MessageBody::Text(String::from(received_message.trim()));
 
-                let template_clone = msg_template.clone();
-
                 match upstream
                     .send(
-                        template_clone
+                        msg_template
+                            .clone()
                             .body(payload)
                             .destination(dest_node)
                             .timestamp()

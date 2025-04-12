@@ -44,58 +44,55 @@ impl ServerSession {
 }
 
 async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
-    match msg.body() {
-        MessageBody::Request(req) => match req {
-            Request::Echo(t) => {
-                let payload = Message::builder()
-                    .source(Node::Server)
-                    .destination(msg.source().to_owned())
-                    .body(MessageBody::Response(Response::Echo(t.to_owned())))
-                    .timestamp()
-                    .unwrap()
-                    .build();
+    match users_handle.get(&msg.source()) {
+        Some(source_upstream) => match msg.body() {
+            MessageBody::Request(req) => match req {
+                Request::Echo(t) => {
+                    let payload = Message::builder()
+                        .source(Node::Server)
+                        .destination(msg.source().to_owned())
+                        .body(MessageBody::Response(Response::Echo(t.to_owned())))
+                        .timestamp()
+                        .unwrap()
+                        .build();
 
-                warn!("Attempting echo to user {}", msg.source());
+                    warn!("Attempting echo to user {}", msg.source());
 
-                match users_handle.get(&msg.source()) {
-                    Some(upstream) => {
-                        _ = upstream.send(payload).await;
-                        info!("Echoed {t:?}\n");
+                    source_upstream.send(payload).await.map_or_else(
+                        |e| error!("Error sending message downstream: {e}"),
+                        |_| info!("Echoed {t:?}\n"),
+                    );
+                }
+                Request::Ping => {
+                    let time_received = msg.timestamp();
+
+                    let payload = Message::builder()
+                        .source(Node::Server)
+                        .destination(msg.source())
+                        .body(MessageBody::Response(Response::Ping(time_received)))
+                        .timestamp()
+                        .unwrap()
+                        .build();
+
+                    warn!("Attempting return ping to user {}", msg.source());
+
+                    source_upstream.send(payload).await.map_or_else(
+                        |e| error!("Error sending message downstream: {e}"),
+                        |_| info!("Returned ping to user {}\n", msg.source()),
+                    );
+                }
+                Request::Connect => todo!(),
+                Request::Disconnect => {
+                    trace!("Attempting to drop {}", msg.source());
+                    match users_handle.remove(&msg.source()) {
+                        Some(_) => warn!("Removed user successfully.\n"),
+                        None => warn!("User was not present in map."),
                     }
-                    None => todo!(),
                 }
-            }
-            Request::Ping => {
-                let time_received = msg.timestamp();
-
-                let payload = Message::builder()
-                    .source(Node::Server)
-                    .destination(msg.source())
-                    .body(MessageBody::Response(Response::Ping(time_received)))
-                    .timestamp()
-                    .unwrap()
-                    .build();
-
-                warn!("Attempting return ping to user {}", msg.source());
-
-                match users_handle.get(&msg.source()) {
-                    Some(upstream) => {
-                        _ = upstream.send(payload).await;
-                        info!("Returned ping to user {}\n", msg.source());
-                    }
-                    None => todo!(),
-                }
-            }
-            Request::Connect => todo!(),
-            Request::Disconnect => {
-                trace!("Attempting to drop {}", msg.source());
-                match users_handle.remove(&msg.source()) {
-                    Some(_) => warn!("Removed user successfully.\n"),
-                    None => warn!("User was not present in map."),
-                }
-            }
+            },
+            _ => trace!("Server received {}", msg),
         },
-        _ => trace!("Server received {}", msg),
+        None => error!("No source stream for user {}", msg.source()),
     }
 }
 
@@ -116,12 +113,27 @@ async fn spawn_writer(mut downstream: Receiver<Message>, mut tx: OwnedWriteHalf)
 
         warn!("Attempting to write {} to {}", msg, id);
 
-        match tx.write(&serde_json::to_vec(&msg).unwrap()).await {
-            Ok(_) => info!("Successfully wrote message to {}\n", id),
-            Err(e) => error!("Error in writer: {e}"),
-        }
+        let byte_msg = serde_json::to_vec(&msg);
+        if byte_msg.is_ok() {
+            let _ = tx
+                .write_all(&byte_msg.unwrap())
+                .await
+                .map_err(|e| error!("Error writing to buffer: {e}"));
 
-        tx.flush().await.unwrap();
+            let _ = tx
+                .flush()
+                .await
+                .map_err(|e| error!("Error flushing writer: {e}"));
+
+            // tx.flush()
+            //     .await
+            //     .map_err(|e| error!("Error flushing buffer: {e}"));
+            // }
+            // {
+            //     Ok(_) => info!("Successfully wrote message to {}\n", id),
+            //     Err(e) => error!("Error in writer: {e}"),
+            // }
+        }
     }
 }
 
@@ -132,51 +144,81 @@ async fn spawn_reader(
 ) {
     let mut received: Vec<u8>;
     loop {
-        if let Ok(r) = buf_reader.fill_buf().await {
-            received = r.to_vec();
+        if let Ok(r) = buf_reader
+            .fill_buf()
+            .await
+            .map(|r| r.to_vec())
+            .inspect(|r| {
+                buf_reader.consume(r.len());
+            })
+        {
+            received = r;
         } else {
             warn!("Dropping user {}", user);
             users_handle.remove(&user);
             return;
         }
+
         if let Ok(msg) = serde_json::from_slice::<Message>(&received) {
             trace!("Received {}", msg);
 
-            match users_handle.get(&msg.destination()) {
-                Some(upstream) => match msg.destination() {
+            if let Some(upstream) = users_handle.get(&msg.destination()) {
+                match msg.destination() {
                     Node::User(user) => {
-                        warn!("Attempting to send message downstream to {}", user.id());
-                        {
-                            upstream.send(msg).await.unwrap();
-                            info!("Forwarded message to user id {}\n", user.id());
-                        };
+                        warn!("Attempting to send message downstream to user {}", user);
+
+                        upstream.send(msg).await.map_or_else(
+                            |e| error!("Error sending message downstream: {e}"),
+                            |_| info!("Forwarded message to user {}\n", user),
+                        );
                     }
                     Node::Server => {
                         warn!("Server received {}\n", msg,);
                     }
                     Node::NoNode => warn!("Message has no node specified.\n"),
-                },
-                None => {
-                    trace!("implement a response of 'user not found'\n");
-                    if let Some(upstream) = users_handle.get(&msg.source()) {
-                        _ = upstream
-                            .send(
-                                Message::builder()
-                                    .source(Node::Server)
-                                    .destination(msg.source())
-                                    .body(MessageBody::Response(Response::UserNotFound(
-                                        msg.destination(),
-                                    )))
-                                    .timestamp()
-                                    .unwrap()
-                                    .build(),
-                            )
-                            .await;
-                    }
                 }
-            };
+            } else {
+                trace!("implement a response of 'user not found'\n");
+                if let Some(upstream) = users_handle.get(&msg.source()) {
+                    upstream
+                        .send(
+                            Message::builder()
+                                .source(Node::Server)
+                                .destination(msg.source())
+                                .body(MessageBody::Response(Response::UserNotFound(
+                                    msg.destination(),
+                                )))
+                                .timestamp()
+                                .unwrap()
+                                .build(),
+                        )
+                        .await
+                        .map_or_else(
+                            |e| error!("Error sending message downstream: {e}"),
+                            |_| info!("Forwarded message to user {}\n", msg.source()),
+                        )
+                }
+                // if let Some(upstream) = users_handle.get(&msg.source()) {
+                //     upstream
+                //         .send(
+                //             Message::builder()
+                //                 .source(Node::Server)
+                //                 .destination(msg.source())
+                //                 .body(MessageBody::Response(Response::UserNotFound(
+                //                     msg.destination(),
+                //                 )))
+                //                 .timestamp()
+                //                 .unwrap()
+                //                 .build(),
+                //         )
+                //         .await
+                //         .map_or_else(
+                //             |e| error!("Error sending message downstream: {e}"),
+                //             |_| info!("Forwarded message to user {}\n", msg.source()),
+                //         );
+                // }
+            }
         }
-        buf_reader.consume(received.len());
     }
 }
 
