@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    time::{SystemTime, SystemTimeError},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -80,15 +80,16 @@ impl MessageBuilder {
         self
     }
 
-    pub fn now() -> Result<u64, SystemTimeError> {
-        Ok(SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs())
+    pub fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_secs()
     }
 
-    pub fn timestamp(mut self) -> Result<Self, SystemTimeError> {
-        self.timestamp = Self::now()?;
-        Ok(self)
+    pub fn timestamp(mut self) -> Self {
+        self.timestamp = Self::now();
+        self
     }
 
     pub fn build(&self) -> Message {
@@ -114,6 +115,7 @@ impl Default for MessageBuilder {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MessageBody {
+    // refactor text file and user as enum communication with aforementioned as impls
     Text(String),
     File(Vec<u8>),
     User(User),

@@ -89,8 +89,16 @@ pub async fn spawn_writer(mut downstream: Receiver<Message>, mut writer: OwnedWr
 pub async fn spawn_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
     let mut received: Vec<u8>;
     loop {
-        received = buf_reader.fill_buf().await.unwrap().to_vec();
-        buf_reader.consume(received.len());
+        match buf_reader.fill_buf().await.map(|r| r.to_vec()) {
+            Ok(v) => {
+                buf_reader.consume(v.len());
+                received = v;
+            }
+            Err(e) => {
+                error!("Error filling buffer: {e}");
+                return;
+            }
+        }
 
         trace!("RECEIVED RAW: {:?}", received);
         if !received.is_empty() {
@@ -109,7 +117,7 @@ pub async fn spawn_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
                         Response::Echo(t) => info!("Server echoed {t:?}"),
                         Response::Ping(t) => {
                             let time_to_server = m.timestamp() - t;
-                            let time_from_server = MessageBuilder::now().unwrap() - m.timestamp();
+                            let time_from_server = MessageBuilder::now() - m.timestamp();
                             info!(
                                 "Ping responded. Time to server: {}, Time from server: {}",
                                 time_to_server, time_from_server
@@ -145,7 +153,6 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
         .destination(Node::Server)
         .body(MessageBody::Request(shared::message::Request::Connect))
         .timestamp()
-        .unwrap()
         .build();
 
     trace!("Message to be sent downstream: {}", auth_req);
@@ -188,7 +195,6 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
                             .body(payload)
                             .destination(dest_node)
                             .timestamp()
-                            .unwrap()
                             .build(),
                     )
                     .await
