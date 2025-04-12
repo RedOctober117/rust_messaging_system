@@ -17,6 +17,8 @@ use tokio::{
     time::sleep,
 };
 
+use crate::gather_user;
+
 pub struct ClientSession {
     user: Node,
     stream: TcpStream,
@@ -25,6 +27,7 @@ pub struct ClientSession {
 impl ClientSession {
     pub async fn new(user: Node, server_addr: (Ipv4Addr, u16)) -> Result<Self> {
         let stream: TcpStream;
+
         loop {
             trace!("Awaiting connection from server...");
             println!("Awaiting connection from server...");
@@ -33,9 +36,8 @@ impl ClientSession {
                 trace!("Established connection with server!");
                 println!("Established connection with server!");
                 break;
-            } else {
-                sleep(Duration::from_secs(1)).await;
             }
+            sleep(Duration::from_secs(1)).await;
         }
 
         Ok(Self { user, stream })
@@ -64,25 +66,21 @@ impl ClientSession {
 }
 
 pub async fn spawn_writer(mut downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
-    let mut counter = 0;
-
     while let Some(msg) = downstream.recv().await {
-        counter += 1;
-        trace!("receiver alive for {} cycles", counter);
-
         warn!("Attempting to write {}", msg);
 
-        match writer
+        writer
             .write_all(&serde_json::to_vec(&msg).expect("Failed to parse msg"))
             .await
-        {
-            Ok(_) => {
-                info!("Successfully wrote message.");
-            }
-            Err(e) => error!("Error in ingress writer: {e}"),
-        }
+            .map_or_else(
+                |e| error!("Error in ingress writer: {e}"),
+                |()| info!("Successfully wrote message."),
+            );
 
-        writer.flush().await.unwrap();
+        writer.flush().await.map_or_else(
+            |e| error!("Error flushing buffer: {e}"),
+            |()| trace!("Flushed buffer successfully."),
+        );
     }
 }
 
@@ -95,53 +93,55 @@ pub async fn spawn_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
                 received = v;
             }
             Err(e) => {
-                error!("Error filling buffer: {e}");
+                error!("Error in buffer: {e}");
                 return;
             }
         }
 
         trace!("RECEIVED RAW: {:?}", received);
-        if !received.is_empty() {
-            if let Ok(m) = serde_json::from_slice::<Message>(&received) {
+        match serde_json::from_slice::<Message>(&received) {
+            Ok(m) => {
                 info!("RECEIVED PARSED: {:?}", m);
                 match m.body() {
                     MessageBody::File(_) => todo!(),
-                    MessageBody::Response(response) => match response {
-                        Response::UserID(_) => todo!(),
-                        Response::ConnectSuccess => {
-                            info!("Connection established successfully with server.");
-                        }
-                        Response::ConnectFail => {
-                            warn!("Failed to establish connection with server.");
-                        }
-                        Response::Echo(t) => info!("Server echoed {t:?}"),
-                        Response::Ping(t) => {
-                            let time_to_server = m.timestamp() - t;
-                            let time_from_server = MessageBuilder::now() - m.timestamp();
-                            info!(
-                                "Ping responded. Time to server: {}, Time from server: {}",
-                                time_to_server, time_from_server
-                            );
-                        }
-                        Response::UserNotFound(u) => {
-                            trace!("Server returned user {} not found.", u);
-                            println!("SERVER: User {} not found!", u);
-                        }
-                    },
+                    MessageBody::Response(Response::ConnectSuccess) => {
+                        info!("Connection established successfully with server.");
+                    }
+                    MessageBody::Response(Response::ConnectFail) => {
+                        warn!("Failed to establish connection with server.");
+                    }
+                    MessageBody::Response(Response::Echo(t)) => {
+                        info!("Server echoed {t:?}");
+                    }
+                    MessageBody::Response(Response::Ping(t)) => {
+                        let time_to_server = m.timestamp() - t;
+                        let time_from_server = MessageBuilder::now() - m.timestamp();
+                        info!(
+                            "Ping responded. Time to server: {}, Time from server: {}",
+                            time_to_server, time_from_server
+                        );
+                    }
+                    MessageBody::Response(Response::UserNotFound(u)) => {
+                        trace!("Server returned user {} not found.", u);
+                        println!("SERVER: User {} not found!", u);
+                    }
+                    MessageBody::Response(Response::UserID(_)) => todo!(),
                     MessageBody::Text(t) => {
                         info!("Received \"{}\" from {}.", t, m.source());
-                        if let Node::User(u) = m.source() {
-                            if let MessageBody::Text(t) = m.body() {
-                                println!("{}: {}", u.format(), t);
+                        match (m.source(), m.body()) {
+                            (Node::User(u), MessageBody::Text(t)) => {
+                                println!("{}: {}", u.format(), t)
                             }
+                            _ => todo!(),
                         }
                     }
                     MessageBody::User(_) => todo!(),
                     MessageBody::Request(_) => todo!(),
                 }
-            } else {
-                warn!("Could not parse buffer");
-                sleep(Duration::from_secs(2)).await;
+            }
+
+            Err(e) => {
+                error!("Error deseralizing message: {e}")
             }
         }
     }
@@ -163,29 +163,23 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
         Ok(_) => {
             trace!("Connection Established.");
 
-            let mut received_id = String::new();
-            let mut received_username = String::new();
             let mut received_message = String::new();
 
             loop {
-                print!("Destination ID: ");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin().read_line(&mut received_id).unwrap();
-
-                print!("Destination Username: ");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin().read_line(&mut received_username).unwrap();
-
-                let dest_node = Node::User(User::new(
-                    // u16::from_str_radix(&received_id.trim(), 10).unwrap(),
-                    received_id.trim().parse::<u16>().unwrap(),
-                    received_username.trim(),
-                ));
+                let dest_node = match gather_user() {
+                    Ok(u) => u,
+                    Err(e) => {
+                        error!("Error in gather_user: {e}");
+                        return;
+                    }
+                };
 
                 print!("Message: ");
                 std::io::stdout().flush().unwrap();
                 std::io::stdin().read_line(&mut received_message).unwrap();
+
                 println!();
+
                 let payload = MessageBody::Text(String::from(received_message.trim()));
 
                 match upstream
@@ -203,8 +197,6 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
                     Err(e) => error!("Error sending message downstream: {e}"),
                 }
 
-                received_id.clear();
-                received_username.clear();
                 received_message.clear();
             }
         }

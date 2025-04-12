@@ -153,39 +153,42 @@ async fn spawn_reader(
             }
         }
 
-        if let Ok(msg) = serde_json::from_slice::<Message>(&received) {
-            trace!("Received {}.", msg);
+        match serde_json::from_slice::<Message>(&received) {
+            Ok(msg) => {
+                trace!("Received {}.", msg);
 
-            if msg.destination() != Node::NoNode {
-                if let Some(upstream) = users_handle.get(&msg.destination()) {
-                    trace!("Attempting to send message downstream to user {}.", user);
+                if msg.destination() != Node::NoNode {
+                    if let Some(upstream) = users_handle.get(&msg.destination()) {
+                        trace!("Attempting to send message downstream to user {}.", user);
 
-                    upstream.send(msg).await.map_or_else(
-                        |e| error!("Failed to write to upstream: {e}"),
-                        |()| trace!("Message sent downstream successfully."),
-                    );
-                } else if let Some(upstream) = users_handle.get(&msg.source()) {
-                    trace!("Attempting to send \"User not found\" downstream.");
-                    upstream
-                        .send(
-                            Message::builder()
-                                .source(Node::Server)
-                                .destination(msg.source())
-                                .body(MessageBody::Response(Response::UserNotFound(
-                                    msg.destination(),
-                                )))
-                                .timestamp()
-                                .build(),
-                        )
-                        .await
-                        .map_or_else(
-                            |e| error!("Error sending message downstream: {e}"),
+                        upstream.send(msg).await.map_or_else(
+                            |e| error!("Failed to write to upstream: {e}"),
                             |()| trace!("Message sent downstream successfully."),
                         );
+                    } else if let Some(upstream) = users_handle.get(&msg.source()) {
+                        trace!("Attempting to send \"User not found\" downstream.");
+                        upstream
+                            .send(
+                                Message::builder()
+                                    .source(Node::Server)
+                                    .destination(msg.source())
+                                    .body(MessageBody::Response(Response::UserNotFound(
+                                        msg.destination(),
+                                    )))
+                                    .timestamp()
+                                    .build(),
+                            )
+                            .await
+                            .map_or_else(
+                                |e| error!("Error sending message downstream: {e}"),
+                                |()| trace!("Message sent downstream successfully."),
+                            );
+                    }
+                } else {
+                    trace!("Message has no node specified.");
                 }
-            } else {
-                trace!("Message has no node specified.");
             }
+            Err(e) => error!("Error deserializing message: {e}"),
         }
     }
 }

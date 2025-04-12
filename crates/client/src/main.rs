@@ -41,7 +41,7 @@ fn gather_user() -> Result<Node> {
     let id: u16;
 
     loop {
-        print!("Enter an id (0-65_000): ");
+        print!("ID (0-65_000): ");
         std::io::stdout().flush()?;
         std::io::stdin().read_line(&mut buffer)?;
 
