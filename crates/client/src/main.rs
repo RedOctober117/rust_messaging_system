@@ -36,21 +36,34 @@ fn gather_ip() -> Result<Ipv4Addr> {
 }
 
 fn gather_user() -> Result<Node> {
-    let mut id = String::new();
-    let mut username = String::new();
+    let mut buffer = String::with_capacity(32);
 
-    print!("Enter an id (u16): ");
+    let id: u16;
+
+    loop {
+        print!("Enter an id (0-65_000): ");
+        std::io::stdout().flush()?;
+        std::io::stdin().read_line(&mut buffer)?;
+
+        if let Ok(parsed_id) = buffer.trim().parse::<u16>() {
+            id = parsed_id;
+            buffer.clear();
+            break;
+        } else {
+            print!("Invalid id type. ");
+            std::io::stdout().flush()?;
+            buffer.clear();
+        }
+    }
+
+    print!("Username (c<32): ");
     std::io::stdout().flush()?;
-    std::io::stdin().read_line(&mut id)?;
+    std::io::stdin().read_line(&mut buffer)?;
 
-    print!("Enter a username: ");
-    std::io::stdout().flush()?;
-    std::io::stdin().read_line(&mut username)?;
+    let username = buffer.trim().to_string();
+    buffer.clear();
 
-    Ok(Node::User(User::new(
-        id.trim().parse::<u16>().unwrap(),
-        username.trim(),
-    )))
+    Ok(Node::User(User::new(id, username)))
 }
 
 // enum ClientError {

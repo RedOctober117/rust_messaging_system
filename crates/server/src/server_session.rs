@@ -44,17 +44,20 @@ impl ServerSession {
 }
 
 async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
-    match users_handle.get(&msg.source()) {
-        Some(source_upstream) => match msg.body() {
-            MessageBody::Request(req) => match req {
-                Request::Echo(t) => {
-                    let payload = Message::builder()
-                        .source(Node::Server)
-                        .destination(msg.source().to_owned())
-                        .body(MessageBody::Response(Response::Echo(t.to_owned())))
-                        .timestamp()
-                        .unwrap()
-                        .build();
+    match msg.body() {
+        MessageBody::Text(_) => todo!(),
+        MessageBody::File(items) => todo!(),
+        MessageBody::User(user) => todo!(),
+        MessageBody::Request(Request::Connect) => todo!(),
+        MessageBody::Request(Request::Disconnect) => todo!(),
+        MessageBody::Request(Request::Echo(t)) => {
+            let payload = Message::builder()
+                .source(Node::Server)
+                .destination(msg.source().to_owned())
+                .body(MessageBody::Response(Response::Echo(t.to_owned())))
+                .timestamp()
+                .unwrap()
+                .build();
 
                     warn!("Attempting echo to user {}", msg.source());
 
@@ -94,6 +97,37 @@ async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
         },
         None => error!("No source stream for user {}", msg.source()),
     }
+            match users_handle.get(&msg.source()) {
+                Some(upstream) => {
+                    _ = upstream.send(payload).await;
+                    info!("Returned ping to user {}\n", msg.source());
+                }
+                None => todo!(),
+            }
+        }
+        MessageBody::Response(Response::Ping(t)) => todo!(),
+        MessageBody::Response(Response::ConnectSuccess) => todo!(),
+        MessageBody::Response(Response::ConnectFail) => todo!(),
+        MessageBody::Response(Response::UserNotFound(_)) => todo!(),
+        MessageBody::Response(Response::UserID(_)) => todo!(),
+        MessageBody::Response(Response::Echo(t)) => todo!(),
+    }
+    // match msg.body() {
+    //     MessageBody::Request(req) => match req {
+    //         Request::Echo(t) =>
+    //
+    //         }
+    //         Request::Connect => todo!(),
+    //         Request::Disconnect => {
+    //             trace!("Attempting to drop {}", msg.source());
+    //             match users_handle.remove(&msg.source()) {
+    //                 Some(_) => warn!("Removed user successfully.\n"),
+    //                 None => warn!("User was not present in map."),
+    //             }
+    //         }
+    //     },
+    //     _ => trace!("Server received {}", msg),
+    // }
 }
 
 async fn spawn_server_thread(users_handle: Arc<UserMap>) {
