@@ -201,26 +201,29 @@ pub async fn spawn_core(
     //         trace!("Connection Established.");
 
     let mut received_message = String::new();
+    let mut stdout = tokio::io::stdout();
+    let stdin = std::io::stdin();
 
-    loop {
-        if let Ok(msg) = u_downstream.try_recv() {
-            trace!("Core downstream received {}", msg);
-            match msg.body() {
-                MessageBody::Text(t) => {
-                    print!("{}: {}", msg.source(), t);
-
-                    std::io::stdout().flush().map_or_else(
-                        |e| error!("Error flushing stdout: {e}"),
-                        |()| trace!("Flushed stdout."),
-                    );
+    tokio::spawn(async move {
+        loop {
+            if let Some(msg) = u_downstream.recv().await {
+                trace!("Core downstream received {}", msg);
+                match (msg.source(), msg.body()) {
+                    (Node::User(user), MessageBody::Text(t)) => {
+                        stdout
+                            .write_all(format!("{}: {}", user.format(), t).as_bytes())
+                            .await
+                            .unwrap();
+                        stdout.flush().await.unwrap();
+                    }
+                    _ => todo!(),
                 }
-                MessageBody::File(_) => todo!(),
-                MessageBody::User(_) => todo!(),
-                MessageBody::Request(_) => todo!(),
-                MessageBody::Response(_) => todo!(),
             }
         }
+    });
 
+    let mut stdout = tokio::io::stdout();
+    loop {
         let dest_node = match gather_user() {
             Ok(u) => u,
             Err(e) => {
@@ -229,15 +232,13 @@ pub async fn spawn_core(
             }
         };
 
-        print!("Message: ");
-        std::io::stdout().flush().unwrap();
-        if let Err(e) = std::io::stdin().read_line(&mut received_message) {
+        stdout.write_all(b"Message: ").await.unwrap();
+        stdout.flush().await.unwrap();
+        if let Err(e) = stdin.read_line(&mut received_message) {
             error!("Error parsing stdin: {e}");
             println!("Error processing input, please try again.");
             continue;
         }
-
-        println!();
 
         let payload = MessageBody::Text(String::from(received_message.trim()));
 
