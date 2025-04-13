@@ -24,10 +24,14 @@ async fn main() -> Result<()> {
 
 fn gather_ip() -> Result<Ipv4Addr> {
     let mut buffer = String::with_capacity(12);
+
+    let mut stdout = std::io::stdout();
+    let stdin = std::io::stdin();
+
     loop {
         print!("Server IP: ");
-        std::io::stdout().flush()?;
-        std::io::stdin().read_line(&mut buffer)?;
+        stdout.flush()?;
+        stdin.read_line(&mut buffer)?;
 
         if let Ok(ip) = buffer.trim().parse::<Ipv4Addr>() {
             return Ok(ip);
@@ -39,11 +43,13 @@ fn gather_user() -> Result<Node> {
     let mut buffer = String::with_capacity(32);
 
     let id: u16;
+    let mut stdout = std::io::stdout();
+    let stdin = std::io::stdin();
 
     loop {
         print!("ID (0-65_000): ");
-        std::io::stdout().flush()?;
-        std::io::stdin().read_line(&mut buffer)?;
+        stdout.flush()?;
+        stdin.read_line(&mut buffer)?;
 
         if let Ok(parsed_id) = buffer.trim().parse::<u16>() {
             id = parsed_id;
@@ -51,14 +57,14 @@ fn gather_user() -> Result<Node> {
             break;
         } else {
             print!("Invalid id type. ");
-            std::io::stdout().flush()?;
+            stdout.flush()?;
             buffer.clear();
         }
     }
 
     print!("Username (c<32): ");
-    std::io::stdout().flush()?;
-    std::io::stdin().read_line(&mut buffer)?;
+    stdout.flush()?;
+    stdin.read_line(&mut buffer)?;
 
     let username = buffer.trim().to_string();
     buffer.clear();

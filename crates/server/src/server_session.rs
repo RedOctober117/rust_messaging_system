@@ -153,42 +153,45 @@ async fn spawn_reader(
             }
         }
 
-        match serde_json::from_slice::<Message>(&received) {
-            Ok(msg) => {
-                trace!("Received {}.", msg);
+        if !received.is_empty() {
+            trace!("Received: {:?}", received);
+            match serde_json::from_slice::<Message>(&received) {
+                Ok(msg) => {
+                    trace!("Received {}.", msg);
 
-                if msg.destination() != Node::NoNode {
-                    if let Some(upstream) = users_handle.get(&msg.destination()) {
-                        trace!("Attempting to send message downstream to user {}.", user);
+                    if msg.destination() != Node::NoNode {
+                        if let Some(upstream) = users_handle.get(&msg.destination()) {
+                            trace!("Attempting to send message downstream to user {}.", user);
 
-                        upstream.send(msg).await.map_or_else(
-                            |e| error!("Failed to write to upstream: {e}"),
-                            |()| trace!("Message sent downstream successfully."),
-                        );
-                    } else if let Some(upstream) = users_handle.get(&msg.source()) {
-                        trace!("Attempting to send \"User not found\" downstream.");
-                        upstream
-                            .send(
-                                Message::builder()
-                                    .source(Node::Server)
-                                    .destination(msg.source())
-                                    .body(MessageBody::Response(Response::UserNotFound(
-                                        msg.destination(),
-                                    )))
-                                    .timestamp()
-                                    .build(),
-                            )
-                            .await
-                            .map_or_else(
-                                |e| error!("Error sending message downstream: {e}"),
+                            upstream.send(msg).await.map_or_else(
+                                |e| error!("Failed to write to upstream: {e}"),
                                 |()| trace!("Message sent downstream successfully."),
                             );
+                        } else if let Some(upstream) = users_handle.get(&msg.source()) {
+                            trace!("Attempting to send \"User not found\" downstream.");
+                            upstream
+                                .send(
+                                    Message::builder()
+                                        .source(Node::Server)
+                                        .destination(msg.source())
+                                        .body(MessageBody::Response(Response::UserNotFound(
+                                            msg.destination(),
+                                        )))
+                                        .timestamp()
+                                        .build(),
+                                )
+                                .await
+                                .map_or_else(
+                                    |e| error!("Error sending message downstream: {e}"),
+                                    |()| trace!("Message sent downstream successfully."),
+                                );
+                        }
+                    } else {
+                        trace!("Message has no node specified.");
                     }
-                } else {
-                    trace!("Message has no node specified.");
                 }
+                Err(e) => error!("Error deserializing message: {e}"),
             }
-            Err(e) => error!("Error deserializing message: {e}"),
         }
     }
 }
@@ -212,70 +215,72 @@ async fn parse_stream(users_handle: Arc<UserMap>, conn: TcpStream) {
 
     trace!("Received {:?}", auth);
 
-    match serde_json::from_slice::<Message>(&auth) {
-        Ok(incoming_msg) => {
-            trace!("Received connection request: {incoming_msg}\n");
+    if !auth.is_empty() {
+        match serde_json::from_slice::<Message>(&auth) {
+            Ok(incoming_msg) => {
+                trace!("Received connection request: {incoming_msg}\n");
 
-            if let MessageBody::Request(Request::Connect) = incoming_msg.body() {
-                let user = incoming_msg.source();
-                let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
+                if let MessageBody::Request(Request::Connect) = incoming_msg.body() {
+                    let user = incoming_msg.source();
+                    let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
-                if !users_handle.contains_key(&user) {
-                    users_handle.insert(user.to_owned(), w_upstream);
-                    trace!("Inserted {user} to hashmap\n");
+                    if !users_handle.contains_key(&user) {
+                        users_handle.insert(user.to_owned(), w_upstream);
+                        trace!("Inserted {user} to hashmap\n");
 
-                    let acceptance_payload = Message::builder()
-                        .source(Node::Server)
-                        .destination(user.to_owned())
-                        .body(MessageBody::Response(Response::ConnectSuccess))
-                        .timestamp()
-                        .build();
+                        let acceptance_payload = Message::builder()
+                            .source(Node::Server)
+                            .destination(user.to_owned())
+                            .body(MessageBody::Response(Response::ConnectSuccess))
+                            .timestamp()
+                            .build();
 
-                    // spawn a thread that auto sends any messages it receives from unstream to the ownedreadhalf
-                    tokio::spawn(spawn_writer(w_downstream, tx));
+                        // spawn a thread that auto sends any messages it receives from unstream to the ownedreadhalf
+                        tokio::spawn(spawn_writer(w_downstream, tx));
 
-                    // spawn a thread to auto forward messages to the appropriate upstreams in the hashmap
-                    tokio::spawn(spawn_reader(
-                        Arc::clone(&users_handle),
-                        buf_reader,
-                        user.to_owned(),
-                    ));
+                        // spawn a thread to auto forward messages to the appropriate upstreams in the hashmap
+                        tokio::spawn(spawn_reader(
+                            Arc::clone(&users_handle),
+                            buf_reader,
+                            user.to_owned(),
+                        ));
 
-                    match users_handle.get(&user) {
-                        Some(u) => {
-                            u.send(acceptance_payload).await.map_or_else(
-                                |e| error!("Could not send message downstream: {e}"),
-                                |()| trace!("Sent message downstream successfully."),
-                            );
+                        match users_handle.get(&user) {
+                            Some(u) => {
+                                u.send(acceptance_payload).await.map_or_else(
+                                    |e| error!("Could not send message downstream: {e}"),
+                                    |()| trace!("Sent message downstream successfully."),
+                                );
+                            }
+                            None => error!("Cound not find user in map after insertion."),
                         }
-                        None => error!("Cound not find user in map after insertion."),
-                    }
-                } else {
-                    trace!("User {user} already exists!\n");
-                    let rejection_payload = Message::builder()
-                        .source(Node::Server)
-                        .destination(user.to_owned())
-                        .body(MessageBody::Response(Response::ConnectFail))
-                        .timestamp()
-                        .build();
+                    } else {
+                        trace!("User {user} already exists!\n");
+                        let rejection_payload = Message::builder()
+                            .source(Node::Server)
+                            .destination(user.to_owned())
+                            .body(MessageBody::Response(Response::ConnectFail))
+                            .timestamp()
+                            .build();
 
-                    match serde_json::to_vec(&rejection_payload) {
-                        Ok(byte_msg) => {
-                            tx.write_all(&byte_msg)
-                                .await
-                                .map_err(|e| error!("Error writing to stream: {e}"))
-                                .ok();
+                        match serde_json::to_vec(&rejection_payload) {
+                            Ok(byte_msg) => {
+                                tx.write_all(&byte_msg)
+                                    .await
+                                    .map_err(|e| error!("Error writing to stream: {e}"))
+                                    .ok();
 
-                            tx.flush()
-                                .await
-                                .map_err(|e| error!("Error flushing stream: {e}"))
-                                .ok();
+                                tx.flush()
+                                    .await
+                                    .map_err(|e| error!("Error flushing stream: {e}"))
+                                    .ok();
+                            }
+                            Err(e) => error!("Error serializing message: {e}"),
                         }
-                        Err(e) => error!("Error serializing message: {e}"),
                     }
                 }
             }
+            Err(e) => error!("Error deserializing message: {e}"),
         }
-        Err(e) => error!("Error deserializing message: {e}"),
     }
 }

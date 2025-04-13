@@ -4,7 +4,7 @@ use std::{io::Result, time::Duration};
 
 use shared::message::{Message, MessageBody, MessageBuilder, Node, Response};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{
@@ -16,7 +16,9 @@ use tokio::{
 
 use crate::gather_user;
 
-// create broadcast channel with upstream in reader and downstreams in writer and interface
+// reader: u_upstream, w_upstream
+// writer: w_downstream
+//   user: u_downstream, w_upstream
 
 pub struct ClientSession {
     user: Node,
@@ -50,22 +52,23 @@ impl ClientSession {
 
         let template = Message::builder().source(self.user.clone());
 
-        let (r_upstream, r_downstream) = broadcast::channel(8);
+        let (u_upstream, u_downstream) = mpsc::channel::<Message>(8);
+        let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
-        tokio::spawn(spawn_writer(r_upstream.subscribe(), writer));
+        tokio::spawn(spawn_writer(w_downstream, writer));
         trace!("Spawned ingress writer");
 
-        tokio::spawn(spawn_reader(buf_reader));
+        tokio::spawn(spawn_reader(buf_reader, u_upstream, w_upstream.clone()));
         trace!("Spawned ingress reader");
 
-        spawn_interface(template, ingress_upstream).await;
+        spawn_core(template, u_downstream, w_upstream).await;
 
         Ok(())
     }
 }
 
-pub async fn spawn_writer(mut downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
-    while let Ok(msg) = downstream.recv().await {
+pub async fn spawn_writer(mut w_downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
+    while let Some(msg) = w_downstream.recv().await {
         warn!("Attempting to write {}", msg);
 
         writer
@@ -83,7 +86,12 @@ pub async fn spawn_writer(mut downstream: Receiver<Message>, mut writer: OwnedWr
     }
 }
 
-pub async fn spawn_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
+// refactor to send msgs via broadcast, not to stdout
+pub async fn spawn_reader(
+    mut buf_reader: BufReader<OwnedReadHalf>,
+    u_upstream: Sender<Message>,
+    _w_upstream: Sender<Message>,
+) {
     let mut received: Vec<u8>;
     loop {
         match buf_reader.fill_buf().await.map(|r| r.to_vec()) {
@@ -99,37 +107,45 @@ pub async fn spawn_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
 
         trace!("RECEIVED RAW: {:?}", received);
         match serde_json::from_slice::<Message>(&received) {
-            Ok(m) => {
-                info!("RECEIVED PARSED: {:?}", m);
-                match m.body() {
+            Ok(msg) => {
+                trace!("Received \"{}\" from {}.", msg, msg.source());
+
+                match msg.body() {
                     MessageBody::File(_) => todo!(),
-                    MessageBody::Response(Response::ConnectSuccess) => {
-                        info!("Connection established successfully with server.");
-                    }
-                    MessageBody::Response(Response::ConnectFail) => {
-                        warn!("Failed to establish connection with server.");
-                    }
-                    MessageBody::Response(Response::Echo(t)) => {
-                        info!("Server echoed {t:?}");
-                    }
-                    MessageBody::Response(Response::Ping(t)) => {
-                        let time_to_server = m.timestamp() - t;
-                        let time_from_server = MessageBuilder::now() - m.timestamp();
-                        info!(
-                            "Ping responded. Time to server: {}, Time from server: {}",
-                            time_to_server, time_from_server
+                    MessageBody::Response(_) => {
+                        trace!("Connection established successfully with server.");
+                        u_upstream.send(msg).await.map_or_else(
+                            |e| error!("Error forwarding Response to core: {e}"),
+                            |()| trace!("Forwarded Response to core."),
                         );
                     }
-                    MessageBody::Response(Response::UserNotFound(u)) => {
-                        trace!("Server returned user {} not found.", u);
-                        println!("SERVER: User {} not found!", u);
-                    }
-                    MessageBody::Response(Response::UserID(_)) => todo!(),
-                    MessageBody::Text(t) => {
-                        info!("Received \"{}\" from {}.", t, m.source());
-                        match (m.source(), m.body()) {
-                            (Node::User(u), MessageBody::Text(t)) => {
-                                println!("{}: {}", u.format(), t)
+                    // MessageBody::Response(Response::ConnectFail) => {
+                    //     warn!("Failed to establish connection with server.");
+                    // }
+                    // MessageBody::Response(Response::Echo(t)) => {
+                    //     info!("Server echoed {t:?}");
+                    // }
+                    // MessageBody::Response(Response::Ping(t)) => {
+                    //     let time_to_server = msg.timestamp() - t;
+                    //     let time_from_server = MessageBuilder::now() - msg.timestamp();
+                    //     info!(
+                    //         "Ping responded. Time to server: {}, Time from server: {}",
+                    //         time_to_server, time_from_server
+                    //     );
+                    // }
+                    // MessageBody::Response(Response::UserNotFound(u)) => {
+                    //     trace!("Server returned user {} not found.", u);
+                    //     println!("SERVER: User {} not found!", u);
+                    // }
+                    // MessageBody::Response(Response::UserID(_)) => todo!(),
+                    MessageBody::Text(_) => {
+                        // broadcast, dont stdout
+                        match (msg.source(), msg.body()) {
+                            (Node::User(_), MessageBody::Text(_)) => {
+                                u_upstream.send(msg).await.map_or_else(
+                                    |e| error!("Error forwarding Text to core: {e}"),
+                                    |()| trace!("Forwarded Text to core."),
+                                );
                             }
                             _ => todo!(),
                         }
@@ -146,7 +162,11 @@ pub async fn spawn_reader(mut buf_reader: BufReader<OwnedReadHalf>) {
     }
 }
 
-pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Message>) {
+pub async fn spawn_core(
+    msg_template: MessageBuilder,
+    mut u_downstream: Receiver<Message>,
+    w_upstream: Sender<Message>,
+) {
     let auth_req = msg_template
         .clone()
         .destination(Node::Server)
@@ -154,52 +174,91 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
         .timestamp()
         .build();
 
-    trace!("Message to be sent downstream: {}", auth_req);
+    trace!("Sending {auth_req} downstream.");
 
-    trace!("Sending connection request...");
-
-    match upstream.send(auth_req) {
-        Ok(_) => {
-            trace!("Connection Established.");
-
-            let mut received_message = String::new();
-
-            loop {
-                let dest_node = match gather_user() {
-                    Ok(u) => u,
-                    Err(e) => {
-                        error!("Error in gather_user: {e}");
-                        return;
-                    }
-                };
-
-                print!("Message: ");
-                std::io::stdout().flush().ok();
-                if let Err(e) = std::io::stdin().read_line(&mut received_message) {
-                    error!("Error parsing stdin: {e}");
-                    println!("Error processing input, please try again.");
-                    continue;
+    if let Ok(()) = w_upstream
+        .send(auth_req)
+        .await
+        .map_err(|e| error!("Error sending auth request downstream: {e}"))
+    {
+        while let Some(msg) = u_downstream.recv().await {
+            match msg.body() {
+                MessageBody::Response(Response::ConnectSuccess) => {
+                    trace!("Successfully authenticated with server!");
+                    break;
                 }
-
-                println!();
-
-                let payload = MessageBody::Text(String::from(received_message.trim()));
-
-                match upstream.send(
-                    msg_template
-                        .clone()
-                        .body(payload)
-                        .destination(dest_node)
-                        .timestamp()
-                        .build(),
-                ) {
-                    Ok(_) => info!("Sent message"),
-                    Err(e) => error!("Error sending message downstream: {e}"),
+                MessageBody::Response(Response::ConnectFail) => {
+                    warn!("Failed to authenticate with server!");
+                    return;
                 }
-
-                received_message.clear();
+                _ => continue,
             }
         }
-        Err(e) => error!("Error establishing connection: {e}"),
     }
+
+    // match upstream.send(auth_req) {
+    //     Ok(_) => {
+    //         trace!("Connection Established.");
+
+    let mut received_message = String::new();
+
+    loop {
+        if let Ok(msg) = u_downstream.try_recv() {
+            trace!("Core downstream received {}", msg);
+            match msg.body() {
+                MessageBody::Text(t) => {
+                    print!("{}: {}", msg.source(), t);
+
+                    std::io::stdout().flush().map_or_else(
+                        |e| error!("Error flushing stdout: {e}"),
+                        |()| trace!("Flushed stdout."),
+                    );
+                }
+                MessageBody::File(_) => todo!(),
+                MessageBody::User(_) => todo!(),
+                MessageBody::Request(_) => todo!(),
+                MessageBody::Response(_) => todo!(),
+            }
+        }
+
+        let dest_node = match gather_user() {
+            Ok(u) => u,
+            Err(e) => {
+                error!("Error in gather_user: {e}");
+                return;
+            }
+        };
+
+        print!("Message: ");
+        std::io::stdout().flush().unwrap();
+        if let Err(e) = std::io::stdin().read_line(&mut received_message) {
+            error!("Error parsing stdin: {e}");
+            println!("Error processing input, please try again.");
+            continue;
+        }
+
+        println!();
+
+        let payload = MessageBody::Text(String::from(received_message.trim()));
+
+        match w_upstream
+            .send(
+                msg_template
+                    .clone()
+                    .body(payload)
+                    .destination(dest_node)
+                    .timestamp()
+                    .build(),
+            )
+            .await
+        {
+            Ok(_) => trace!("Sent message to writer."),
+            Err(e) => error!("Error sending message downstream: {e}"),
+        }
+
+        received_message.clear();
+    }
+    //     }
+    //     Err(e) => error!("Error establishing connection: {e}"),
+    // }
 }
