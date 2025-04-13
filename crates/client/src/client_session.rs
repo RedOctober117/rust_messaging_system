@@ -2,12 +2,9 @@ use std::io::Write;
 use std::net::Ipv4Addr;
 use std::{io::Result, time::Duration};
 
-use shared::{
-    message::{Message, MessageBody, MessageBuilder, Node, Response},
-    user::User,
-};
+use shared::message::{Message, MessageBody, MessageBuilder, Node, Response};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::{
@@ -18,6 +15,8 @@ use tokio::{
 };
 
 use crate::gather_user;
+
+// create broadcast channel with upstream in reader and downstreams in writer and interface
 
 pub struct ClientSession {
     user: Node,
@@ -51,9 +50,9 @@ impl ClientSession {
 
         let template = Message::builder().source(self.user.clone());
 
-        let (ingress_upstream, ingress_downstream) = mpsc::channel::<Message>(8);
+        let (r_upstream, r_downstream) = broadcast::channel(8);
 
-        tokio::spawn(spawn_writer(ingress_downstream, writer));
+        tokio::spawn(spawn_writer(r_upstream.subscribe(), writer));
         trace!("Spawned ingress writer");
 
         tokio::spawn(spawn_reader(buf_reader));
@@ -66,7 +65,7 @@ impl ClientSession {
 }
 
 pub async fn spawn_writer(mut downstream: Receiver<Message>, mut writer: OwnedWriteHalf) {
-    while let Some(msg) = downstream.recv().await {
+    while let Ok(msg) = downstream.recv().await {
         warn!("Attempting to write {}", msg);
 
         writer
@@ -159,7 +158,7 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
 
     trace!("Sending connection request...");
 
-    match upstream.send(auth_req).await {
+    match upstream.send(auth_req) {
         Ok(_) => {
             trace!("Connection Established.");
 
@@ -175,24 +174,25 @@ pub async fn spawn_interface(msg_template: MessageBuilder, upstream: Sender<Mess
                 };
 
                 print!("Message: ");
-                std::io::stdout().flush().unwrap();
-                std::io::stdin().read_line(&mut received_message).unwrap();
+                std::io::stdout().flush().ok();
+                if let Err(e) = std::io::stdin().read_line(&mut received_message) {
+                    error!("Error parsing stdin: {e}");
+                    println!("Error processing input, please try again.");
+                    continue;
+                }
 
                 println!();
 
                 let payload = MessageBody::Text(String::from(received_message.trim()));
 
-                match upstream
-                    .send(
-                        msg_template
-                            .clone()
-                            .body(payload)
-                            .destination(dest_node)
-                            .timestamp()
-                            .build(),
-                    )
-                    .await
-                {
+                match upstream.send(
+                    msg_template
+                        .clone()
+                        .body(payload)
+                        .destination(dest_node)
+                        .timestamp()
+                        .build(),
+                ) {
                     Ok(_) => info!("Sent message"),
                     Err(e) => error!("Error sending message downstream: {e}"),
                 }
