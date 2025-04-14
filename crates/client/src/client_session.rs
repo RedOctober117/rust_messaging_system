@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::net::Ipv4Addr;
 use std::{io::Result, time::Duration};
 
@@ -52,16 +51,16 @@ impl ClientSession {
 
         let template = Message::builder().source(self.user.clone());
 
-        let (u_upstream, u_downstream) = mpsc::channel::<Message>(8);
+        let (r_upstream, r_downstream) = mpsc::channel::<Message>(8);
         let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
         tokio::spawn(spawn_writer(w_downstream, writer));
         trace!("Spawned ingress writer");
 
-        tokio::spawn(spawn_reader(buf_reader, u_upstream, w_upstream.clone()));
+        tokio::spawn(spawn_reader(buf_reader, r_upstream, w_upstream.clone()));
         trace!("Spawned ingress reader");
 
-        spawn_core(template, u_downstream, w_upstream).await;
+        spawn_core(template, r_downstream, w_upstream).await;
 
         Ok(())
     }
@@ -89,7 +88,7 @@ pub async fn spawn_writer(mut w_downstream: Receiver<Message>, mut writer: Owned
 // refactor to send msgs via broadcast, not to stdout
 pub async fn spawn_reader(
     mut buf_reader: BufReader<OwnedReadHalf>,
-    u_upstream: Sender<Message>,
+    r_upstream: Sender<Message>,
     _w_upstream: Sender<Message>,
 ) {
     let mut received: Vec<u8>;
@@ -105,6 +104,10 @@ pub async fn spawn_reader(
             }
         }
 
+        if received.is_empty() {
+            continue;
+        }
+
         trace!("RECEIVED RAW: {:?}", received);
         match serde_json::from_slice::<Message>(&received) {
             Ok(msg) => {
@@ -114,7 +117,7 @@ pub async fn spawn_reader(
                     MessageBody::File(_) => todo!(),
                     MessageBody::Response(_) => {
                         trace!("Connection established successfully with server.");
-                        u_upstream.send(msg).await.map_or_else(
+                        r_upstream.send(msg).await.map_or_else(
                             |e| error!("Error forwarding Response to core: {e}"),
                             |()| trace!("Forwarded Response to core."),
                         );
@@ -138,18 +141,15 @@ pub async fn spawn_reader(
                     //     println!("SERVER: User {} not found!", u);
                     // }
                     // MessageBody::Response(Response::UserID(_)) => todo!(),
-                    MessageBody::Text(_) => {
-                        // broadcast, dont stdout
-                        match (msg.source(), msg.body()) {
-                            (Node::User(_), MessageBody::Text(_)) => {
-                                u_upstream.send(msg).await.map_or_else(
-                                    |e| error!("Error forwarding Text to core: {e}"),
-                                    |()| trace!("Forwarded Text to core."),
-                                );
-                            }
-                            _ => todo!(),
+                    MessageBody::Text(_) => match (msg.source(), msg.body()) {
+                        (Node::User(_), MessageBody::Text(_)) => {
+                            r_upstream.send(msg).await.map_or_else(
+                                |e| error!("Error forwarding Text to core: {e}"),
+                                |()| trace!("Forwarded Text to core."),
+                            );
                         }
-                    }
+                        _ => todo!(),
+                    },
                     MessageBody::User(_) => todo!(),
                     MessageBody::Request(_) => todo!(),
                 }
@@ -164,7 +164,7 @@ pub async fn spawn_reader(
 
 pub async fn spawn_core(
     msg_template: MessageBuilder,
-    mut u_downstream: Receiver<Message>,
+    mut r_downstream: Receiver<Message>,
     w_upstream: Sender<Message>,
 ) {
     let auth_req = msg_template
@@ -181,7 +181,7 @@ pub async fn spawn_core(
         .await
         .map_err(|e| error!("Error sending auth request downstream: {e}"))
     {
-        while let Some(msg) = u_downstream.recv().await {
+        while let Some(msg) = r_downstream.recv().await {
             match msg.body() {
                 MessageBody::Response(Response::ConnectSuccess) => {
                     trace!("Successfully authenticated with server!");
@@ -196,25 +196,25 @@ pub async fn spawn_core(
         }
     }
 
-    // match upstream.send(auth_req) {
-    //     Ok(_) => {
-    //         trace!("Connection Established.");
-
     let mut received_message = String::new();
     let mut stdout = tokio::io::stdout();
     let stdin = std::io::stdin();
 
     tokio::spawn(async move {
         loop {
-            if let Some(msg) = u_downstream.recv().await {
+            if let Some(msg) = r_downstream.recv().await {
                 trace!("Core downstream received {}", msg);
                 match (msg.source(), msg.body()) {
                     (Node::User(user), MessageBody::Text(t)) => {
-                        stdout
+                        if let Ok(()) = stdout
                             .write_all(format!("{}: {}", user.format(), t).as_bytes())
                             .await
-                            .unwrap();
-                        stdout.flush().await.unwrap();
+                        {
+                            stdout.flush().await.map_or_else(
+                                |e| error!("Error flushing buffer: {e}"),
+                                |()| trace!("Flushed buffer"),
+                            );
+                        }
                     }
                     _ => todo!(),
                 }
@@ -232,8 +232,12 @@ pub async fn spawn_core(
             }
         };
 
-        stdout.write_all(b"Message: ").await.unwrap();
-        stdout.flush().await.unwrap();
+        if let Ok(()) = stdout.write_all(b"Message: ").await {
+            stdout.flush().await.map_or_else(
+                |e| error!("Error flushing buffer: {e}"),
+                |()| trace!("Flushed buffer"),
+            );
+        }
         if let Err(e) = stdin.read_line(&mut received_message) {
             error!("Error parsing stdin: {e}");
             println!("Error processing input, please try again.");

@@ -107,7 +107,7 @@ impl Default for MessageBuilder {
         Self {
             source: Node::NoNode,
             destination: Node::NoNode,
-            timestamp: 0,
+            timestamp: Self::now(),
             body: MessageBody::Text("".into()),
         }
     }
