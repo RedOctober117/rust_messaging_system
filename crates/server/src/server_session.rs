@@ -1,6 +1,8 @@
 use std::{io::Result, net::IpAddr, sync::Arc};
 
-use shared::message::{Message, MessageBody, Node, Request, Response};
+use shared::{
+    message::Message, message_body::MessageBody, node::Node, request::Request, response::Response,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{

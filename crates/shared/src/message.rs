@@ -1,18 +1,15 @@
-use std::{
-    fmt::Display,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::user::User;
+use crate::{message_body::MessageBody, message_builder::MessageBuilder, node::Node, user::User};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
-    body: MessageBody,
-    timestamp: u64,
-    source: Node,
-    destination: Node,
+    pub(crate) body: MessageBody,
+    pub(crate) timestamp: u64,
+    pub(crate) source: Node,
+    pub(crate) destination: Node,
 }
 
 impl Message {
@@ -44,129 +41,6 @@ impl Display for Message {
             "{{ {{ Source: {} }}, {{ Destination: {} }}, {{ Body: {} }}, {{ Timestamp: {} }} }}",
             self.source, self.destination, self.body, self.timestamp
         )
-    }
-}
-
-#[derive(Clone)]
-pub struct MessageBuilder {
-    body: MessageBody,
-    timestamp: u64,
-    source: Node,
-    destination: Node,
-}
-
-impl MessageBuilder {
-    pub fn new() -> Self {
-        Self {
-            source: Node::NoNode,
-            destination: Node::NoNode,
-            timestamp: 0,
-            body: MessageBody::Text("".into()),
-        }
-    }
-
-    pub fn source(mut self, src: Node) -> Self {
-        self.source = src;
-        self
-    }
-
-    pub fn destination(mut self, dest: Node) -> Self {
-        self.destination = dest;
-        self
-    }
-
-    pub fn body(mut self, message_body: MessageBody) -> Self {
-        self.body = message_body;
-        self
-    }
-
-    pub fn now() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
-            .as_secs()
-    }
-
-    pub fn timestamp(mut self) -> Self {
-        self.timestamp = Self::now();
-        self
-    }
-
-    pub fn build(&self) -> Message {
-        Message {
-            source: self.source.clone(),
-            destination: self.destination.clone(),
-            timestamp: self.timestamp,
-            body: self.body.to_owned(),
-        }
-    }
-}
-
-impl Default for MessageBuilder {
-    fn default() -> Self {
-        Self {
-            source: Node::NoNode,
-            destination: Node::NoNode,
-            timestamp: Self::now(),
-            body: MessageBody::Text("".into()),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum MessageBody {
-    // refactor text file and user as enum communication with aforementioned as impls
-    Text(String),
-    File(Vec<u8>),
-    User(User),
-    Request(Request),
-    Response(Response),
-}
-
-impl Display for MessageBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MessageBody::Text(t) => write!(f, "{{ Text: {t} }}"),
-            MessageBody::File(_) => write!(f, "{{ <file> }}"),
-            MessageBody::User(user) => write!(f, "{{ User: {user} }}"),
-            MessageBody::Request(request) => write!(f, "{{ Request: {request:?} }}"),
-            MessageBody::Response(response) => write!(f, "{{ Response: {response:?} }}"),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Request {
-    Connect,
-    Disconnect,
-    Echo(Vec<u8>),
-    Ping,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Response {
-    UserID(u16),
-    ConnectSuccess,
-    ConnectFail,
-    Echo(Vec<u8>),
-    Ping(u64),
-    UserNotFound(Node),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Node {
-    Server,
-    User(User),
-    NoNode,
-}
-
-impl Display for Node {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Node::Server => write!(f, "Server"),
-            Node::User(user) => write!(f, "{}", user),
-            Node::NoNode => write!(f, "No Node"),
-        }
     }
 }
 

@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use shared::message::{Message, Node};
+use shared::{message::Message, node::Node};
 use tokio::sync::mpsc::Sender;
 
 pub struct UserMap {

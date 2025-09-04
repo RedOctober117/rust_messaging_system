@@ -1,7 +1,11 @@
 use std::net::Ipv4Addr;
 use std::{io::Result, time::Duration};
 
-use shared::message::{Message, MessageBody, MessageBuilder, Node, Response};
+use shared::message::Message;
+use shared::message_body::MessageBody;
+use shared::message_builder::MessageBuilder;
+use shared::node::Node;
+use shared::response::Response;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::{
@@ -170,7 +174,7 @@ pub async fn spawn_core(
     let auth_req = msg_template
         .clone()
         .destination(Node::Server)
-        .body(MessageBody::Request(shared::message::Request::Connect))
+        .body(MessageBody::Request(shared::request::Request::Connect))
         .timestamp()
         .build();
 

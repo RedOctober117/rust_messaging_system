@@ -1,5 +1,5 @@
 use client_session::ClientSession;
-use shared::{message::Node, user::User};
+use shared::{node::Node, user::User};
 use std::io::Result;
 use std::io::Write;
 use std::net::Ipv4Addr;
