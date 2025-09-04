@@ -20,11 +20,11 @@ pub struct ServerSession {
 impl ServerSession {
     pub async fn new(addr: (IpAddr, u16)) -> Result<Self> {
         match TcpListener::bind(addr).await {
-            Ok(l) => {
+            Ok(listener) => {
                 trace!("Listening on {}:{}", addr.0, addr.1);
                 Ok(Self {
                     user_map: UserMap::new(),
-                    listener: l,
+                    listener,
                 })
             }
             Err(e) => {
@@ -43,18 +43,35 @@ impl ServerSession {
     }
 }
 
-async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
+enum MessageDecision {
+    RemoveUser(Node),
+    SendUpstream(Message),
+}
+
+async fn handle_message_decision(users_handle: Arc<UserMap>, decision: MessageDecision) {
+    match decision {
+        MessageDecision::RemoveUser(node) => users_handle.remove(&node).map_or_else(
+            || trace!("User {} was not present in map.", node),
+            |_| trace!("Removed user {} successfully.", node),
+        ),
+        MessageDecision::SendUpstream(message) => {
+            if let Some(upstream) = users_handle.get(&message.destination()) {
+                upstream.send(message).await.map_or_else(
+                    |e| error!("Could not send ping downstream: {e}"),
+                    |_| trace!("Ping sent downstream successfully."),
+                )
+            }
+        }
+    }
+}
+
+async fn handle_message(msg: Message) -> MessageDecision {
     match msg.body() {
         MessageBody::Text(_) => todo!(),
         MessageBody::File(_) => todo!(),
         MessageBody::User(_) => todo!(),
         MessageBody::Request(Request::Connect) => todo!(),
-        MessageBody::Request(Request::Disconnect) => {
-            users_handle.remove(&msg.source()).map_or_else(
-                || trace!("User {} was not present in map.", msg.source()),
-                |_| trace!("Removed user {} successfully.", msg.source()),
-            )
-        }
+        MessageBody::Request(Request::Disconnect) => MessageDecision::RemoveUser(msg.source()),
         MessageBody::Request(Request::Ping) => {
             let time_received = msg.timestamp();
 
@@ -65,29 +82,19 @@ async fn handle_message(users_handle: Arc<UserMap>, msg: Message) {
                 .timestamp()
                 .build();
 
-            if let Some(upstream) = users_handle.get(&msg.source()) {
-                upstream.send(payload).await.map_or_else(
-                    |e| error!("Could not send ping downstream: {e}"),
-                    |_| trace!("Ping sent downstream successfully."),
-                )
-            }
+            MessageDecision::SendUpstream(payload)
         }
-        MessageBody::Request(Request::Echo(t)) => {
+        MessageBody::Request(Request::Echo(echo_msg)) => {
             let payload = Message::builder()
                 .source(Node::Server)
                 .destination(msg.source().to_owned())
-                .body(MessageBody::Response(Response::Echo(t.to_owned())))
+                .body(MessageBody::Response(Response::Echo(echo_msg.to_owned())))
                 .timestamp()
                 .build();
 
             trace!("Attempting echo to user {}", msg.source());
 
-            if let Some(upstream) = users_handle.get(&msg.source()) {
-                upstream.send(payload).await.map_or_else(
-                    |e| error!("Could not send message downstream: {e}"),
-                    |_| trace!("Message sent downstream successfully."),
-                )
-            }
+            MessageDecision::SendUpstream(payload)
         }
 
         MessageBody::Response(Response::Ping(_)) => todo!(),
@@ -106,7 +113,12 @@ async fn spawn_server_thread(users_handle: Arc<UserMap>) {
 
     // spawn the server task to display received messages
     while let Some(msg) = server_downstream.recv().await {
-        tokio::spawn(handle_message(Arc::clone(&users_handle), msg));
+        let handle_clone = Arc::clone(&users_handle);
+
+        tokio::spawn(async move {
+            let decision = handle_message(msg).await;
+            handle_message_decision(handle_clone, decision).await;
+        });
     }
 }
 
@@ -137,7 +149,7 @@ async fn spawn_reader(
     users_handle: Arc<UserMap>,
     mut buf_reader: BufReader<OwnedReadHalf>,
     user: Node,
-) {
+) -> Result<std::io::Error> {
     let mut received: Vec<u8>;
     loop {
         match buf_reader.fill_buf().await.map(|r| r.to_vec()) {
@@ -145,11 +157,11 @@ async fn spawn_reader(
                 buf_reader.consume(v.len());
                 received = v;
             }
-            Err(_) => {
+            Err(e) => {
                 trace!("Dropping user {}.", user);
                 users_handle.remove(&user);
                 trace!("User {} dropped.", user);
-                return;
+                return Err(e);
             }
         }
 
