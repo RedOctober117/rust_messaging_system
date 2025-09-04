@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{message_body::MessageBody, message_builder::MessageBuilder, node::Node, user::User};
+use crate::{message_body::MessageBody, message_builder::MessageBuilder, node::Node};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
