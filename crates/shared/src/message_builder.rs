@@ -1,11 +1,16 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::{message::Message, message_body::MessageBody, node::Node};
+use crate::{
+    message::Message,
+    message_data::{LoginStateData, MessageData},
+    node::Node,
+    varuint::VarUInt,
+};
 
 #[derive(Clone)]
 pub struct MessageBuilder {
-    body: MessageBody,
-    timestamp: u64,
+    body: MessageData,
+    timestamp: VarUInt,
     source: Node,
     destination: Node,
 }
@@ -13,10 +18,10 @@ pub struct MessageBuilder {
 impl MessageBuilder {
     pub fn new() -> Self {
         Self {
-            source: Node::NoNode,
-            destination: Node::NoNode,
-            timestamp: 0,
-            body: MessageBody::Text(String::with_capacity(140)),
+            source: Node::default(),
+            destination: Node::default(),
+            timestamp: VarUInt(0),
+            body: MessageData::LoginStateData(LoginStateData::RequestConnect),
         }
     }
 
@@ -30,7 +35,7 @@ impl MessageBuilder {
         self
     }
 
-    pub fn body(mut self, message_body: MessageBody) -> Self {
+    pub fn body(mut self, message_body: MessageData) -> Self {
         self.body = message_body;
         self
     }
@@ -43,7 +48,7 @@ impl MessageBuilder {
     }
 
     pub fn timestamp(mut self) -> Self {
-        self.timestamp = Self::now();
+        self.timestamp = VarUInt(Self::now());
         self
     }
 
@@ -52,7 +57,7 @@ impl MessageBuilder {
             source: self.source.clone(),
             destination: self.destination.clone(),
             timestamp: self.timestamp,
-            body: self.body.to_owned(),
+            data: self.body.to_owned(),
         }
     }
 }
@@ -60,10 +65,10 @@ impl MessageBuilder {
 impl Default for MessageBuilder {
     fn default() -> Self {
         Self {
-            source: Node::NoNode,
-            destination: Node::NoNode,
-            timestamp: Self::now(),
-            body: MessageBody::Text("".into()),
+            source: Node::default(),
+            destination: Node::default(),
+            timestamp: VarUInt(Self::now()),
+            body: MessageData::LoginStateData(LoginStateData::RequestConnect),
         }
     }
 }

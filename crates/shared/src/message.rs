@@ -1,13 +1,17 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    io::{Result, Write},
+};
 
-use serde::{Deserialize, Serialize};
+use crate::{
+    encode::Encode, message_builder::MessageBuilder, message_data::MessageData, node::Node,
+    varuint::VarUInt,
+};
 
-use crate::{message_body::MessageBody, message_builder::MessageBuilder, node::Node};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Message {
-    pub(crate) body: MessageBody,
-    pub(crate) timestamp: u64,
+    pub(crate) data: MessageData,
+    pub(crate) timestamp: VarUInt,
     pub(crate) source: Node,
     pub(crate) destination: Node,
 }
@@ -17,8 +21,8 @@ impl Message {
         MessageBuilder::default()
     }
 
-    pub fn body(&self) -> &MessageBody {
-        &self.body
+    pub fn body(&self) -> &MessageData {
+        &self.data
     }
 
     pub fn destination(&self) -> Node {
@@ -29,7 +33,7 @@ impl Message {
         self.source.clone()
     }
 
-    pub fn timestamp(&self) -> u64 {
+    pub fn timestamp(&self) -> VarUInt {
         self.timestamp
     }
 }
@@ -38,48 +42,67 @@ impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{{ {{ Source: {} }}, {{ Destination: {} }}, {{ Body: {} }}, {{ Timestamp: {} }} }}",
-            self.source, self.destination, self.body, self.timestamp
+            "{{ {{ Source: {:?} }}, {{ Destination: {:?} }}, {{ Data: {:?} }}, {{ Timestamp: {:?} }} }}",
+            self.source, self.destination, self.data, self.timestamp
         )
     }
 }
 
-// impl PartialEq for Node {
-//     fn eq(&self, other: &Self) -> bool {
-//         match (self, other) {
-//             (Self::User(l0), Self::User(r0)) => l0 == r0,
-//             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-//         }
-//     }
-// }
+impl Encode for Message {
+    fn write_encoded(&self, writer: &mut impl Write) -> Result<()> {
+        let mut buffer = vec![];
 
-// pub fn as_netstring(mut self) -> Result<String, serde_json::Error> {
-//     let serialized_message = self.as_json()?;
+        self.destination.write_encoded(&mut buffer).unwrap();
+        self.source.write_encoded(&mut buffer).unwrap();
+        self.timestamp.write_encoded(&mut buffer).unwrap();
+        self.data.write_encoded(&mut buffer).unwrap();
 
-//     let normalized_message = format!("{}:{}", serialized_message.len(), serialized_message);
+        let buffer_len = VarUInt(buffer.len() as u64);
 
-//     Ok(normalized_message)
-// }
+        buffer_len.write_encoded(writer).unwrap();
+        writer.write_all(&buffer)
+    }
 
-// pub fn from_netstring(netstr: &[u8]) -> Result<Message, serde_json::Error> {
-//     serde_json::from_slice::<Message>(&netstr)
-// }
+    fn as_bytes(&self) -> Result<Vec<u8>> {
+        let mut buffer = vec![];
+        self.write_encoded(&mut buffer).unwrap();
+        Ok(buffer)
+    }
+}
 
-// uses netstring: https://en.wikipedia.org/wiki/Netstring
-// /// Does not establish connection automatically
-// pub async fn send(mut self, mut connection: TcpStream) -> MessageResult<()> {
-//     let serialized_message = self.as_json()?;
-//     if serialized_message.len() > 2990 {
-//         return Err(Box::new(MessageError::MessageTooLong));
-//     }
+#[cfg(test)]
+mod test {
 
-//     let size_component = format!("{}:", serialized_message.len());
-//     let normalized_message = format!("{}{}", size_component, serialized_message);
-//     info!("Sent {}", normalized_message);
+    use crate::{
+        encode::Encode,
+        message::Message,
+        message_data::{LoginStateData, MessageData},
+        node::Node,
+    };
 
-//     connection.write_all(normalized_message.as_bytes()).await?;
+    #[test]
+    fn message() {
+        let mut buffer: Vec<u8> = vec![];
+        let mut check_buffer = vec![];
+        let builder = Message::builder();
+        let msg = builder
+            .destination(Node::new("user_2"))
+            .source(Node::new("user_1"))
+            .timestamp()
+            .body(MessageData::LoginStateData(LoginStateData::RequestConnect))
+            .build();
 
-//     connection.flush().await?;
+        msg.destination.write_encoded(&mut check_buffer).unwrap();
+        msg.source.write_encoded(&mut check_buffer).unwrap();
+        msg.timestamp.write_encoded(&mut check_buffer).unwrap();
+        msg.data.write_encoded(&mut check_buffer).unwrap();
 
-//     Ok(())
-// }
+        msg.write_encoded(&mut buffer).unwrap();
+
+        println!("{:?}", buffer);
+
+        // this assertion only works because we know the len of the packet
+        // fits in a single varuint length
+        assert_eq!(buffer[1..], check_buffer);
+    }
+}
