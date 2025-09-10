@@ -4,8 +4,9 @@ use std::{
 };
 
 use crate::{
-    encode::Encode, message_builder::MessageBuilder, message_data::MessageData, node::Node,
-    varuint::VarUInt,
+    decode::Decode, encode::Encode, login_state_data::LoginStateData,
+    message_builder::MessageBuilder, message_data::MessageData, node::Node, varuint::VarUInt,
+    NO_STATE,
 };
 
 #[derive(Clone, Debug)]
@@ -49,24 +50,56 @@ impl Display for Message {
 }
 
 impl Encode for Message {
-    fn write_encoded(&self, writer: &mut impl Write) -> Result<()> {
+    fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> Result<()> {
         let mut buffer = vec![];
 
-        self.destination.write_encoded(&mut buffer).unwrap();
-        self.source.write_encoded(&mut buffer).unwrap();
-        self.timestamp.write_encoded(&mut buffer).unwrap();
-        self.data.write_encoded(&mut buffer).unwrap();
+        self.destination
+            .write_encoded(NO_STATE, &mut buffer)
+            .unwrap();
+        self.source.write_encoded(NO_STATE, &mut buffer).unwrap();
+        self.timestamp.write_encoded(NO_STATE, &mut buffer).unwrap();
+        self.data.write_encoded(NO_STATE, &mut buffer).unwrap();
 
         let buffer_len = VarUInt(buffer.len() as u64);
 
-        buffer_len.write_encoded(writer).unwrap();
+        buffer_len.write_encoded(NO_STATE, writer).unwrap();
         writer.write_all(&buffer)
     }
 
     fn as_bytes(&self) -> Result<Vec<u8>> {
         let mut buffer = vec![];
-        self.write_encoded(&mut buffer).unwrap();
+        self.write_encoded(NO_STATE, &mut buffer).unwrap();
         Ok(buffer)
+    }
+}
+
+impl Decode for Message {
+    fn decode_reader(
+        state: u8,
+        reader: &mut impl std::io::Read,
+    ) -> std::result::Result<Box<Self>, Box<dyn std::error::Error>> {
+        let len = *VarUInt::decode_reader(state, reader)?;
+
+        let mut temp_buff = Vec::with_capacity(usize::from(len));
+        reader.read_exact(&mut temp_buff)?;
+        let mut sized_buffer = temp_buff.as_slice();
+
+        let destination: Node = *Node::decode_reader(state, &mut sized_buffer)?;
+        let source: Node = *Node::decode_reader(state, &mut sized_buffer)?;
+        let timestamp: VarUInt = *VarUInt::decode_reader(state, &mut sized_buffer)?;
+        let data: MessageData = (*LoginStateData::decode_reader(state, &mut sized_buffer)?).into();
+
+        println!(
+            "got {:?} {:?} {:?} {:?}",
+            destination, source, timestamp, data
+        );
+
+        Ok(Box::new(Message {
+            destination,
+            source,
+            timestamp,
+            data,
+        }))
     }
 }
 
@@ -74,8 +107,8 @@ impl Encode for Message {
 mod test {
 
     use crate::{
-        encode::Encode, login_state_data::LoginStateData, message::Message,
-        message_data::MessageData, node::Node,
+        decode::Decode, encode::Encode, login_state_data::LoginStateData, message::Message,
+        message_data::MessageData, node::Node, NO_STATE,
     };
 
     #[test]
@@ -90,17 +123,41 @@ mod test {
             .data(MessageData::LoginStateData(LoginStateData::RequestConnect))
             .build();
 
-        msg.destination.write_encoded(&mut check_buffer).unwrap();
-        msg.source.write_encoded(&mut check_buffer).unwrap();
-        msg.timestamp.write_encoded(&mut check_buffer).unwrap();
-        msg.data.write_encoded(&mut check_buffer).unwrap();
+        msg.destination
+            .write_encoded(NO_STATE, &mut check_buffer)
+            .unwrap();
+        msg.source
+            .write_encoded(NO_STATE, &mut check_buffer)
+            .unwrap();
+        msg.timestamp
+            .write_encoded(NO_STATE, &mut check_buffer)
+            .unwrap();
+        msg.data.write_encoded(NO_STATE, &mut check_buffer).unwrap();
 
-        msg.write_encoded(&mut buffer).unwrap();
+        msg.write_encoded(NO_STATE, &mut buffer).unwrap();
 
         println!("{:?}", buffer);
 
         // this assertion only works because we know the len of the packet
         // fits in a single varuint length
         assert_eq!(buffer[1..], check_buffer);
+    }
+
+    #[test]
+    fn decode_msg() {
+        let mut buf: &[u8] = &[
+            20, 6, 117, 115, 101, 114, 95, 50, 6, 117, 115, 101, 114, 95, 49, 204, 155, 134, 198,
+            6, 0,
+        ];
+
+        let msg = *Message::decode_reader(0x00, &mut buf).unwrap();
+
+        println!("{}", msg);
+        assert_eq!(
+            msg.data().to_owned(),
+            MessageData::LoginStateData(LoginStateData::RequestConnect)
+        );
+        assert_eq!(msg.source(), Node::new("user_1"));
+        assert_eq!(msg.destination(), Node::new("user_2"));
     }
 }

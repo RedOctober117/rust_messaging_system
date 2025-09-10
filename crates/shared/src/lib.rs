@@ -8,4 +8,6 @@ pub mod message_data;
 pub mod node;
 pub mod varuint;
 
+pub const NO_STATE: u8 = 0;
+
 extern crate pretty_env_logger;

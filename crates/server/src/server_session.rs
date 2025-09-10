@@ -1,7 +1,7 @@
 use std::{io::Result, net::IpAddr, sync::Arc};
 
 use shared::{
-    message::Message, message_body::MessageBody, node::Node, request::Request, response::Response,
+    message::Message, message_data::MessageData, node::Node, request::Request, response::Response,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -68,29 +68,29 @@ async fn handle_message_decision(users_handle: Arc<UserMap>, decision: MessageDe
 }
 
 async fn handle_message(msg: Message) -> MessageDecision {
-    match msg.body() {
-        MessageBody::Text(_) => todo!(),
-        MessageBody::File(_) => todo!(),
-        MessageBody::User(_) => todo!(),
-        MessageBody::Request(Request::Connect) => todo!(),
-        MessageBody::Request(Request::Disconnect) => MessageDecision::RemoveUser(msg.source()),
-        MessageBody::Request(Request::Ping) => {
+    match msg.data() {
+        MessageData::Text(_) => todo!(),
+        MessageData::File(_) => todo!(),
+        MessageData::User(_) => todo!(),
+        MessageData::Request(Request::Connect) => todo!(),
+        MessageData::Request(Request::Disconnect) => MessageDecision::RemoveUser(msg.source()),
+        MessageData::Request(Request::Ping) => {
             let time_received = msg.timestamp();
 
             let payload = Message::builder()
                 .source(Node::Server)
                 .destination(msg.source())
-                .body(MessageBody::Response(Response::Ping(time_received)))
+                .data(MessageData::Response(Response::Ping(time_received)))
                 .timestamp()
                 .build();
 
             MessageDecision::SendUpstream(payload)
         }
-        MessageBody::Request(Request::Echo(echo_msg)) => {
+        MessageData::Request(Request::Echo(echo_msg)) => {
             let payload = Message::builder()
                 .source(Node::Server)
                 .destination(msg.source().to_owned())
-                .body(MessageBody::Response(Response::Echo(echo_msg.to_owned())))
+                .data(MessageData::Response(Response::Echo(echo_msg.to_owned())))
                 .timestamp()
                 .build();
 
@@ -99,12 +99,12 @@ async fn handle_message(msg: Message) -> MessageDecision {
             MessageDecision::SendUpstream(payload)
         }
 
-        MessageBody::Response(Response::Ping(_)) => todo!(),
-        MessageBody::Response(Response::ConnectSuccess) => todo!(),
-        MessageBody::Response(Response::ConnectFail) => todo!(),
-        MessageBody::Response(Response::UserNotFound(_)) => todo!(),
-        MessageBody::Response(Response::UserID(_)) => todo!(),
-        MessageBody::Response(Response::Echo(_)) => todo!(),
+        MessageData::Response(Response::Ping(_)) => todo!(),
+        MessageData::Response(Response::ConnectSuccess) => todo!(),
+        MessageData::Response(Response::ConnectFail) => todo!(),
+        MessageData::Response(Response::UserNotFound(_)) => todo!(),
+        MessageData::Response(Response::UserID(_)) => todo!(),
+        MessageData::Response(Response::Echo(_)) => todo!(),
     }
 }
 
@@ -191,7 +191,7 @@ async fn spawn_reader(
                                 Message::builder()
                                     .source(Node::Server)
                                     .destination(msg.source())
-                                    .body(MessageBody::Response(Response::UserNotFound(
+                                    .data(MessageData::Response(Response::UserNotFound(
                                         msg.destination(),
                                     )))
                                     .timestamp()
@@ -239,7 +239,7 @@ async fn parse_stream(users_handle: Arc<UserMap>, conn: TcpStream) {
         Ok(incoming_msg) => {
             trace!("Received connection request: {incoming_msg}\n");
 
-            if let MessageBody::Request(Request::Connect) = incoming_msg.body() {
+            if let MessageData::Request(Request::Connect) = incoming_msg.data() {
                 let user = incoming_msg.source();
                 let (w_upstream, w_downstream) = mpsc::channel::<Message>(8);
 
@@ -250,7 +250,7 @@ async fn parse_stream(users_handle: Arc<UserMap>, conn: TcpStream) {
                     let acceptance_payload = Message::builder()
                         .source(Node::Server)
                         .destination(user.to_owned())
-                        .body(MessageBody::Response(Response::ConnectSuccess))
+                        .data(MessageData::Response(Response::ConnectSuccess))
                         .timestamp()
                         .build();
 
@@ -278,7 +278,7 @@ async fn parse_stream(users_handle: Arc<UserMap>, conn: TcpStream) {
                     let rejection_payload = Message::builder()
                         .source(Node::Server)
                         .destination(user.to_owned())
-                        .body(MessageBody::Response(Response::ConnectFail))
+                        .data(MessageData::Response(Response::ConnectFail))
                         .timestamp()
                         .build();
 

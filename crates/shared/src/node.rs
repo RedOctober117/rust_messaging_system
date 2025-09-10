@@ -1,8 +1,8 @@
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 
 // use serde::{Deserialize, Serialize};
 
-use crate::{decode::Decode, encode::Encode, varuint::VarUInt};
+use crate::{decode::Decode, encode::Encode, varuint::VarUInt, NO_STATE};
 
 pub const SERVER_NODE: [u8; 2] = [1, 0];
 
@@ -22,7 +22,7 @@ impl Default for Node {
 }
 
 impl Encode for Node {
-    fn write_encoded(&self, writer: &mut impl Write) -> std::io::Result<()> {
+    fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> std::io::Result<()> {
         writer
             .write(&mut VarUInt(self.0.len() as u64).encode())
             .unwrap();
@@ -31,23 +31,27 @@ impl Encode for Node {
 
     fn as_bytes(&self) -> std::io::Result<Vec<u8>> {
         let mut buffer = vec![];
-        self.write_encoded(&mut buffer).unwrap();
+        self.write_encoded(NO_STATE, &mut buffer).unwrap();
         Ok(buffer)
     }
 }
 
 impl Decode for Node {
     fn decode_reader(
+        _state: u8,
         reader: &mut impl std::io::Read,
     ) -> Result<Box<Node>, Box<(dyn std::error::Error)>> {
-        let length = *VarUInt::decode_reader(reader).unwrap();
-        let mut buf = Vec::with_capacity(length.into());
+        let length = *VarUInt::decode_reader(NO_STATE, reader)?;
+        let mut buf = BufReader::with_capacity(usize::from(length), reader);
 
-        reader.read_exact(&mut buf).unwrap();
+        // println!("node received buffer {:?}", buf);
 
-        Ok(Box::new(Node::new(buf)))
+        // reader.read_exact(&mut buf)?;
+
+        Ok(Box::new(Node::new()))
     }
 }
+the fuck man
 
 #[cfg(test)]
 mod test {

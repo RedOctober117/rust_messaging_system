@@ -5,7 +5,7 @@ use std::{
 
 use thiserror::{self, Error};
 
-use crate::{decode::Decode, encode::Encode};
+use crate::{decode::Decode, encode::Encode, NO_STATE};
 
 pub type VarUIntSize = u64;
 pub type RawVarUInt = Vec<u8>;
@@ -79,19 +79,22 @@ impl From<VarUInt> for usize {
 }
 
 impl Encode for VarUInt {
-    fn write_encoded(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
+    fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> Result<(), std::io::Error> {
         writer.write_all(&self.encode())
     }
 
     fn as_bytes(&self) -> Result<Vec<u8>, std::io::Error> {
         let mut buffer = vec![];
-        self.write_encoded(&mut buffer).unwrap();
+        self.write_encoded(NO_STATE, &mut buffer).unwrap();
         Ok(buffer)
     }
 }
 
 impl Decode for VarUInt {
-    fn decode_reader(reader: &mut impl Read) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+    fn decode_reader(
+        _state: u8,
+        reader: &mut impl Read,
+    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
         let mut result: VarUIntSize = 0;
         let mut shift: u8 = 0;
 
@@ -149,34 +152,39 @@ mod tests {
         let mut buffer = vec![];
 
         let test_int = VarUInt(1);
-        test_int.write_encoded(&mut buffer).unwrap();
+        test_int.write_encoded(NO_STATE, &mut buffer).unwrap();
 
         assert_eq!(buffer, [1]);
 
         buffer.clear();
-        VarUInt(25565).write_encoded(&mut buffer).unwrap();
+        VarUInt(25565).write_encoded(NO_STATE, &mut buffer).unwrap();
         assert_eq!(buffer, [221, 199, 1]);
 
         buffer.clear();
-        VarUInt(25565).write_encoded(&mut buffer).unwrap();
+        VarUInt(25565).write_encoded(NO_STATE, &mut buffer).unwrap();
         assert_eq!(buffer, [221, 199, 1]);
 
         buffer.clear();
-        VarUInt(2147483647).write_encoded(&mut buffer).unwrap();
+        VarUInt(2147483647)
+            .write_encoded(NO_STATE, &mut buffer)
+            .unwrap();
         assert_eq!(buffer, [255, 255, 255, 255, 7]);
     }
 
     #[test]
     fn decode_buffer() {
-        assert_eq!(*VarUInt::decode_reader(&mut &[1][..]).unwrap(), VarUInt(1));
+        assert_eq!(
+            *VarUInt::decode_reader(NO_STATE, &mut &[1][..]).unwrap(),
+            VarUInt(1)
+        );
 
         assert_eq!(
-            *VarUInt::decode_reader(&mut &[221, 199, 1][..]).unwrap(),
+            *VarUInt::decode_reader(NO_STATE, &mut &[221, 199, 1][..]).unwrap(),
             VarUInt(25565)
         );
 
         assert_eq!(
-            *VarUInt::decode_reader(&mut &[255, 255, 255, 255, 7][..]).unwrap(),
+            *VarUInt::decode_reader(NO_STATE, &mut &[255, 255, 255, 255, 7][..]).unwrap(),
             VarUInt(2147483647)
         );
     }
@@ -185,20 +193,26 @@ mod tests {
     fn decode_buffer_with_extra() {
         let mut buf: &[u8] = &[1, 2];
 
-        assert_eq!(*VarUInt::decode_reader(&mut buf).unwrap(), VarUInt(1));
+        assert_eq!(
+            *VarUInt::decode_reader(NO_STATE, &mut buf).unwrap(),
+            VarUInt(1)
+        );
         assert_eq!(buf.len(), 1);
         assert_eq!(buf, [2]);
 
         buf = &[221, 199, 1, 9, 6];
 
-        assert_eq!(*VarUInt::decode_reader(&mut buf).unwrap(), VarUInt(25565));
+        assert_eq!(
+            *VarUInt::decode_reader(NO_STATE, &mut buf).unwrap(),
+            VarUInt(25565)
+        );
         assert_eq!(buf.len(), 2);
         assert_eq!(buf, [9, 6]);
 
         buf = &[255, 255, 255, 255, 7, 254, 1];
 
         assert_eq!(
-            *VarUInt::decode_reader(&mut buf).unwrap(),
+            *VarUInt::decode_reader(NO_STATE, &mut buf).unwrap(),
             VarUInt(2147483647)
         );
         assert_eq!(buf.len(), 2);

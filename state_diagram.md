@@ -10,7 +10,7 @@ Fields should be formed as:
 
 Complete messages are prepended by a `VarUInt` denoting the packets length, excluding the size of the `VarUInt` itself.
 
-> `destination` is specified first to limit the processing needing to be done by the server. If the destination is not `0, 0`, then the server simply needs to forward the packet on.
+> `destination` is specified first to limit the processing needing to be done by the server. If the destination is not `1, 0`, then the server simply needs to forward the packet on.
 
 ### Source
 
@@ -98,8 +98,37 @@ The former two categories expect some type of return message from the destinatio
 
 #### Client -> Client
 
-- `communication_text`, 0x00
-- `communication_file`, 0x01
+- `communication_text`, 0x03
+- `communication_file`, 0x04
+
+## Valid Client Packets
+
+### State: Login
+
+- `request_connect`, 0x00
+- `response_connect_ack`, 0x01
+
+### State: Communication
+
+- `request_disconnect`, 0x00
+- `request_ping`, 0x01
+- `request_echo`, 0x02
+- `communication_text`, 0x03
+- `communication_file`, 0x04
+
+## Valid Server Packets
+
+### State: Login
+
+- `response_connect_success`, 0x00
+- `response_connect_fail`, 0x01
+
+### State: Communication
+
+- `response_disconnect`, 0x00
+- `response_ping`, 0x01
+- `response_echo`, 0x02
+- `order_disconnect`, 0x03
 
 ## Examples
 

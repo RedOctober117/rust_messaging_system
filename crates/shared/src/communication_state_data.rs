@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use thiserror::Error;
 
-use crate::{decode::Decode, encode::Encode, varuint::VarUInt};
+use crate::{decode::Decode, encode::Encode, varuint::VarUInt, NO_STATE};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -16,7 +16,7 @@ pub enum CommunicationStateData {
 
 impl CommunicationStateData {
     fn discriminant(&self) -> u8 {
-        unsafe { *(self as *const Self as *const u8) }
+        unsafe { *<*const _>::from(self).cast::<u8>() }
     }
 }
 
@@ -42,7 +42,7 @@ impl TryFrom<VarUInt> for CommunicationStateData {
 }
 
 impl Encode for CommunicationStateData {
-    fn write_encoded(&self, writer: &mut impl Write) -> std::io::Result<()> {
+    fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> std::io::Result<()> {
         writer
             .write_all(&[self.discriminant()])
             .map_err(|e| return e)?;
@@ -59,14 +59,18 @@ impl Encode for CommunicationStateData {
 
     fn as_bytes(&self) -> std::io::Result<Vec<u8>> {
         let mut buffer = vec![];
-        self.write_encoded(&mut buffer).unwrap();
+        self.write_encoded(NO_STATE, &mut buffer).unwrap();
         Ok(buffer)
     }
 }
 
 impl Decode for CommunicationStateData {
-    fn decode_reader(reader: &mut impl Read) -> Result<Box<Self>, Box<dyn std::error::Error>> {
-        let code: CommunicationStateData = (*VarUInt::decode_reader(reader)?).try_into()?;
+    fn decode_reader(
+        _state: u8,
+        reader: &mut impl Read,
+    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+        let code: CommunicationStateData =
+            (*VarUInt::decode_reader(NO_STATE, reader)?).try_into()?;
         let mut buf = vec![];
 
         reader.read_to_end(&mut buf)?;
@@ -84,11 +88,8 @@ impl Decode for CommunicationStateData {
 
 #[cfg(test)]
 mod test {
-    use std::mem::discriminant;
-
     use crate::{
-        communication_state_data::CommunicationStateData, decode::Decode, encode::Encode,
-        varuint::VarUInt,
+        communication_state_data::CommunicationStateData, decode::Decode, encode::Encode, NO_STATE,
     };
 
     #[test]
@@ -96,7 +97,7 @@ mod test {
         let mut reader: &[u8] = &[0x00];
 
         assert_eq!(
-            *CommunicationStateData::decode_reader(&mut reader).unwrap(),
+            *CommunicationStateData::decode_reader(NO_STATE, &mut reader).unwrap(),
             CommunicationStateData::RequestDisconnect
         )
     }
@@ -106,7 +107,9 @@ mod test {
         let mut buffer = vec![];
         let value = CommunicationStateData::RequestDisconnect;
 
-        value.write_encoded(&mut buffer).expect("buffer error");
+        value
+            .write_encoded(NO_STATE, &mut buffer)
+            .expect("buffer error");
         assert_eq!(buffer[..], [0x00])
     }
 
@@ -122,7 +125,9 @@ mod test {
             .iter()
             .for_each(|b| custom_buff.push(b.to_owned()));
 
-        value.write_encoded(&mut buffer).expect("buffer error");
+        value
+            .write_encoded(NO_STATE, &mut buffer)
+            .expect("buffer error");
         assert_eq!(buffer[..], custom_buff)
     }
 
@@ -131,10 +136,12 @@ mod test {
         let mut buffer = vec![];
         let init_val = CommunicationStateData::RequestPing;
 
-        init_val.write_encoded(&mut buffer).expect("buffer error");
+        init_val
+            .write_encoded(NO_STATE, &mut buffer)
+            .expect("buffer error");
 
         assert_eq!(
-            *CommunicationStateData::decode_reader(&mut buffer.as_slice()).unwrap(),
+            *CommunicationStateData::decode_reader(NO_STATE, &mut buffer.as_slice()).unwrap(),
             init_val
         )
     }

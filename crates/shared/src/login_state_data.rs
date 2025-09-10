@@ -1,9 +1,11 @@
 use std::io::Write;
 
-use crate::{decode::Decode, encode::Encode, varuint::VarUInt};
+use crate::{
+    decode::Decode, encode::Encode, message_data::MessageData, varuint::VarUInt, NO_STATE,
+};
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoginStateData {
     RequestConnect = 0x00,
     RequestConnectAck = 0x01,
@@ -12,6 +14,17 @@ pub enum LoginStateData {
 impl LoginStateData {
     fn discriminant(&self) -> u8 {
         unsafe { *(self as *const Self as *const u8) }
+    }
+}
+
+impl TryFrom<MessageData> for LoginStateData {
+    type Error = &'static str;
+
+    fn try_from(value: MessageData) -> Result<Self, Self::Error> {
+        match value {
+            MessageData::LoginStateData(e) => Ok(e),
+            _ => Err("could not convert to LoginStateData"),
+        }
     }
 }
 
@@ -34,22 +47,23 @@ impl TryFrom<VarUInt> for LoginStateData {
 }
 
 impl Encode for LoginStateData {
-    fn write_encoded(&self, writer: &mut impl Write) -> std::io::Result<()> {
+    fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> std::io::Result<()> {
         writer.write_all(&[self.discriminant()])
     }
 
     fn as_bytes(&self) -> std::io::Result<Vec<u8>> {
         let mut buffer = vec![];
-        self.write_encoded(&mut buffer)?;
+        self.write_encoded(NO_STATE, &mut buffer)?;
         Ok(buffer)
     }
 }
 
 impl Decode for LoginStateData {
     fn decode_reader(
+        _state: u8,
         reader: &mut impl std::io::Read,
     ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
-        let value = *VarUInt::decode_reader(reader)?;
+        let value = *VarUInt::decode_reader(NO_STATE, reader)?;
         LoginStateData::try_from(value).map(|v| Ok(Box::new(v)))?
     }
 }

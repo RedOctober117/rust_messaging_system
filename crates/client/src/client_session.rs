@@ -2,8 +2,8 @@ use std::net::Ipv4Addr;
 use std::{io::Result, time::Duration};
 
 use shared::message::Message;
-use shared::message_body::MessageBody;
 use shared::message_builder::MessageBuilder;
+use shared::message_data::MessageData;
 use shared::node::Node;
 use shared::response::Response;
 use tokio::io::AsyncWriteExt;
@@ -117,9 +117,9 @@ pub async fn spawn_reader(
             Ok(msg) => {
                 trace!("Received \"{}\" from {}.", msg, msg.source());
 
-                match msg.body() {
-                    MessageBody::File(_) => todo!(),
-                    MessageBody::Response(_) => {
+                match msg.data() {
+                    MessageData::File(_) => todo!(),
+                    MessageData::Response(_) => {
                         trace!("Connection established successfully with server.");
                         r_upstream.send(msg).await.map_or_else(
                             |e| error!("Error forwarding Response to core: {e}"),
@@ -145,8 +145,8 @@ pub async fn spawn_reader(
                     //     println!("SERVER: User {} not found!", u);
                     // }
                     // MessageBody::Response(Response::UserID(_)) => todo!(),
-                    MessageBody::Text(_) => match (msg.source(), msg.body()) {
-                        (Node::User(_), MessageBody::Text(_)) => {
+                    MessageData::Text(_) => match (msg.source(), msg.data()) {
+                        (Node::User(_), MessageData::Text(_)) => {
                             r_upstream.send(msg).await.map_or_else(
                                 |e| error!("Error forwarding Text to core: {e}"),
                                 |()| trace!("Forwarded Text to core."),
@@ -154,8 +154,8 @@ pub async fn spawn_reader(
                         }
                         _ => todo!(),
                     },
-                    MessageBody::User(_) => todo!(),
-                    MessageBody::Request(_) => todo!(),
+                    MessageData::User(_) => todo!(),
+                    MessageData::Request(_) => todo!(),
                 }
             }
 
@@ -174,7 +174,7 @@ pub async fn spawn_core(
     let auth_req = msg_template
         .clone()
         .destination(Node::Server)
-        .body(MessageBody::Request(shared::request::Request::Connect))
+        .data(MessageData::Request(shared::request::Request::Connect))
         .timestamp()
         .build();
 
@@ -186,12 +186,12 @@ pub async fn spawn_core(
         .map_err(|e| error!("Error sending auth request downstream: {e}"))
     {
         while let Some(msg) = r_downstream.recv().await {
-            match msg.body() {
-                MessageBody::Response(Response::ConnectSuccess) => {
+            match msg.data() {
+                MessageData::Response(Response::ConnectSuccess) => {
                     trace!("Successfully authenticated with server!");
                     break;
                 }
-                MessageBody::Response(Response::ConnectFail) => {
+                MessageData::Response(Response::ConnectFail) => {
                     warn!("Failed to authenticate with server!");
                     return;
                 }
@@ -208,8 +208,8 @@ pub async fn spawn_core(
         loop {
             if let Some(msg) = r_downstream.recv().await {
                 trace!("Core downstream received {}", msg);
-                match (msg.source(), msg.body()) {
-                    (Node::User(user), MessageBody::Text(t)) => {
+                match (msg.source(), msg.data()) {
+                    (Node::User(user), MessageData::Text(t)) => {
                         if let Ok(()) = stdout
                             .write_all(format!("{}: {}", user.format(), t).as_bytes())
                             .await
@@ -248,13 +248,13 @@ pub async fn spawn_core(
             continue;
         }
 
-        let payload = MessageBody::Text(String::from(received_message.trim()));
+        let payload = MessageData::Text(String::from(received_message.trim()));
 
         match w_upstream
             .send(
                 msg_template
                     .clone()
-                    .body(payload)
+                    .data(payload)
                     .destination(dest_node)
                     .timestamp()
                     .build(),
