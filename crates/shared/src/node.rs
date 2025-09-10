@@ -1,4 +1,4 @@
-use std::io::{Result, Write};
+use std::io::Write;
 
 // use serde::{Deserialize, Serialize};
 
@@ -22,14 +22,14 @@ impl Default for Node {
 }
 
 impl Encode for Node {
-    fn write_encoded(&self, writer: &mut impl Write) -> Result<()> {
+    fn write_encoded(&self, writer: &mut impl Write) -> std::io::Result<()> {
         writer
             .write(&mut VarUInt(self.0.len() as u64).encode())
             .unwrap();
         writer.write_all(&self.0)
     }
 
-    fn as_bytes(&self) -> Result<Vec<u8>> {
+    fn as_bytes(&self) -> std::io::Result<Vec<u8>> {
         let mut buffer = vec![];
         self.write_encoded(&mut buffer).unwrap();
         Ok(buffer)
@@ -37,7 +37,9 @@ impl Encode for Node {
 }
 
 impl Decode for Node {
-    fn decode_reader(reader: &mut impl std::io::Read) -> Result<Box<Self>> {
+    fn decode_reader(
+        reader: &mut impl std::io::Read,
+    ) -> Result<Box<Node>, Box<(dyn std::error::Error)>> {
         let length = *VarUInt::decode_reader(reader).unwrap();
         let mut buf = Vec::with_capacity(length.into());
 

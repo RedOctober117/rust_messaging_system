@@ -1,0 +1,55 @@
+use std::io::Write;
+
+use crate::{decode::Decode, encode::Encode, varuint::VarUInt};
+use thiserror::Error;
+
+#[derive(Clone, Debug)]
+pub enum LoginStateData {
+    RequestConnect = 0x00,
+    RequestConnectAck = 0x01,
+}
+
+impl LoginStateData {
+    fn discriminant(&self) -> u8 {
+        unsafe { *(self as *const Self as *const u8) }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LoginStateDataError {
+    #[error("failed to convert {} to LoginStateData", .0)]
+    Conversion(VarUInt),
+}
+
+impl TryFrom<VarUInt> for LoginStateData {
+    type Error = LoginStateDataError;
+
+    fn try_from(value: VarUInt) -> Result<Self, Self::Error> {
+        match value.0 {
+            0x00 => Ok(Self::RequestConnect),
+            0x01 => Ok(Self::RequestConnectAck),
+            _ => Err(LoginStateDataError::Conversion(value)),
+        }
+    }
+}
+
+impl Encode for LoginStateData {
+    fn write_encoded(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        writer.write_all(&[self.discriminant()])
+    }
+
+    fn as_bytes(&self) -> std::io::Result<Vec<u8>> {
+        let mut buffer = vec![];
+        self.write_encoded(&mut buffer)?;
+        Ok(buffer)
+    }
+}
+
+impl Decode for LoginStateData {
+    fn decode_reader(
+        reader: &mut impl std::io::Read,
+    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+        let value = *VarUInt::decode_reader(reader)?;
+        LoginStateData::try_from(value).map(|v| Ok(Box::new(v)))?
+    }
+}

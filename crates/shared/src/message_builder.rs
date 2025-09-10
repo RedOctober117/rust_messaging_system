@@ -1,15 +1,13 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    message::Message,
-    message_data::{LoginStateData, MessageData},
-    node::Node,
+    login_state_data::LoginStateData, message::Message, message_data::MessageData, node::Node,
     varuint::VarUInt,
 };
 
 #[derive(Clone)]
 pub struct MessageBuilder {
-    body: MessageData,
+    data: MessageData,
     timestamp: VarUInt,
     source: Node,
     destination: Node,
@@ -21,7 +19,8 @@ impl MessageBuilder {
             source: Node::default(),
             destination: Node::default(),
             timestamp: VarUInt(0),
-            body: MessageData::LoginStateData(LoginStateData::RequestConnect),
+            data: MessageData::LoginStateData(LoginStateData::RequestConnect),
+            // body: MessageData::LoginStateData(LoginStateData::RequestConnect),
         }
     }
 
@@ -35,8 +34,8 @@ impl MessageBuilder {
         self
     }
 
-    pub fn body(mut self, message_body: MessageData) -> Self {
-        self.body = message_body;
+    pub fn data(mut self, message_body: MessageData) -> Self {
+        self.data = message_body;
         self
     }
 
@@ -57,7 +56,7 @@ impl MessageBuilder {
             source: self.source.clone(),
             destination: self.destination.clone(),
             timestamp: self.timestamp,
-            data: self.body.to_owned(),
+            data: self.data.to_owned(),
         }
     }
 }
@@ -68,7 +67,7 @@ impl Default for MessageBuilder {
             source: Node::default(),
             destination: Node::default(),
             timestamp: VarUInt(Self::now()),
-            body: MessageData::LoginStateData(LoginStateData::RequestConnect),
+            data: MessageData::LoginStateData(LoginStateData::RequestConnect),
         }
     }
 }

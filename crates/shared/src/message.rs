@@ -21,7 +21,7 @@ impl Message {
         MessageBuilder::default()
     }
 
-    pub fn body(&self) -> &MessageData {
+    pub fn data(&self) -> &MessageData {
         &self.data
     }
 
@@ -74,10 +74,8 @@ impl Encode for Message {
 mod test {
 
     use crate::{
-        encode::Encode,
-        message::Message,
-        message_data::{LoginStateData, MessageData},
-        node::Node,
+        encode::Encode, login_state_data::LoginStateData, message::Message,
+        message_data::MessageData, node::Node,
     };
 
     #[test]
@@ -89,7 +87,7 @@ mod test {
             .destination(Node::new("user_2"))
             .source(Node::new("user_1"))
             .timestamp()
-            .body(MessageData::LoginStateData(LoginStateData::RequestConnect))
+            .data(MessageData::LoginStateData(LoginStateData::RequestConnect))
             .build();
 
         msg.destination.write_encoded(&mut check_buffer).unwrap();
