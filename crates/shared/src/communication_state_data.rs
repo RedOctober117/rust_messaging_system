@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{BufRead, Write};
 
 use thiserror::Error;
 
@@ -67,7 +67,7 @@ impl Encode for CommunicationStateData {
 impl Decode for CommunicationStateData {
     fn decode_reader(
         _state: u8,
-        reader: &mut impl Read,
+        reader: &mut impl BufRead,
     ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
         let code: CommunicationStateData =
             (*VarUInt::decode_reader(NO_STATE, reader)?).try_into()?;

@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    io::{Read, Write},
+    io::{BufRead, Read, Write},
 };
 
 use thiserror::{self, Error};
@@ -93,7 +93,7 @@ impl Encode for VarUInt {
 impl Decode for VarUInt {
     fn decode_reader(
         _state: u8,
-        reader: &mut impl Read,
+        reader: &mut impl BufRead,
     ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
         let mut result: VarUIntSize = 0;
         let mut shift: u8 = 0;

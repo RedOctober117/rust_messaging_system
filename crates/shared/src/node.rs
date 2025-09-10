@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 
 // use serde::{Deserialize, Serialize};
 
@@ -39,19 +39,18 @@ impl Encode for Node {
 impl Decode for Node {
     fn decode_reader(
         _state: u8,
-        reader: &mut impl std::io::Read,
+        reader: &mut impl std::io::BufRead,
     ) -> Result<Box<Node>, Box<(dyn std::error::Error)>> {
         let length = *VarUInt::decode_reader(NO_STATE, reader)?;
-        let mut buf = BufReader::with_capacity(usize::from(length), reader);
 
-        // println!("node received buffer {:?}", buf);
+        let mut take = reader.take(u64::from(length));
+        let mut buf: Vec<u8> = vec![];
 
-        // reader.read_exact(&mut buf)?;
+        take.read_to_end(&mut buf)?;
 
-        Ok(Box::new(Node::new()))
+        Ok(Box::new(Node(buf)))
     }
 }
-the fuck man
 
 #[cfg(test)]
 mod test {

@@ -45,7 +45,7 @@ impl Encode for MessageData {
 impl Decode for MessageData {
     fn decode_reader(
         state: u8,
-        reader: &mut impl std::io::Read,
+        reader: &mut impl std::io::BufRead,
     ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
         match state {
             0x00 => Ok(Box::new(MessageData::LoginStateData(

@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    io::{Result, Write},
+    io::{BufReader, Read, Result, Write},
 };
 
 use crate::{
@@ -76,23 +76,27 @@ impl Encode for Message {
 impl Decode for Message {
     fn decode_reader(
         state: u8,
-        reader: &mut impl std::io::Read,
+        reader: &mut impl std::io::BufRead,
     ) -> std::result::Result<Box<Self>, Box<dyn std::error::Error>> {
         let len = *VarUInt::decode_reader(state, reader)?;
 
-        let mut temp_buff = Vec::with_capacity(usize::from(len));
-        reader.read_exact(&mut temp_buff)?;
-        let mut sized_buffer = temp_buff.as_slice();
+        let take = reader.take(u64::from(len));
+        let mut sized_buffer = BufReader::new(take);
+        // take.read_to_end(&mut sized_buffer)?;
+
+        // let mut temp_buff = Vec::with_capacity(usize::from(len));
+        // reader.read_exact(&mut temp_buff)?;
+        // let mut sized_buffer = temp_buff.as_slice();
 
         let destination: Node = *Node::decode_reader(state, &mut sized_buffer)?;
         let source: Node = *Node::decode_reader(state, &mut sized_buffer)?;
         let timestamp: VarUInt = *VarUInt::decode_reader(state, &mut sized_buffer)?;
         let data: MessageData = (*LoginStateData::decode_reader(state, &mut sized_buffer)?).into();
 
-        println!(
-            "got {:?} {:?} {:?} {:?}",
-            destination, source, timestamp, data
-        );
+        // println!(
+        //     "got {:?} {:?} {:?} {:?}",
+        //     destination, source, timestamp, data
+        // );
 
         Ok(Box::new(Message {
             destination,
@@ -152,7 +156,7 @@ mod test {
 
         let msg = *Message::decode_reader(0x00, &mut buf).unwrap();
 
-        println!("{}", msg);
+        // println!("{}", msg);
         assert_eq!(
             msg.data().to_owned(),
             MessageData::LoginStateData(LoginStateData::RequestConnect)
