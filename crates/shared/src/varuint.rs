@@ -8,7 +8,7 @@ use thiserror::{self, Error};
 use crate::{
     decode::{Decode, DecodeResult},
     encode::Encode,
-    BoxedError, NO_STATE,
+    NO_STATE,
 };
 
 pub type VarUIntSize = u64;

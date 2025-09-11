@@ -5,8 +5,7 @@ use thiserror::Error;
 use crate::{
     decode::{Decode, DecodeResult},
     encode::Encode,
-    varuint::VarUInt,
-    BoxedError, NO_STATE,
+    varuint::VarUInt, NO_STATE,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

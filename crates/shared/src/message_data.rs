@@ -2,8 +2,7 @@ use crate::{
     communication_state_data::CommunicationStateData,
     decode::{Decode, DecodeResult},
     encode::Encode,
-    login_state_data::LoginStateData,
-    BoxedError, NO_STATE,
+    login_state_data::LoginStateData, NO_STATE,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -10,8 +10,7 @@ use crate::{
     message_builder::MessageBuilder,
     message_data::MessageData,
     source_or_destination::SourceOrDestination,
-    varuint::VarUInt,
-    BoxedError, NO_STATE,
+    varuint::VarUInt, NO_STATE,
 };
 
 #[derive(Clone, Debug)]

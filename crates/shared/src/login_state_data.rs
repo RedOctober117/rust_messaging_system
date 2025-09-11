@@ -4,8 +4,7 @@ use crate::{
     decode::{Decode, DecodeResult},
     encode::Encode,
     message_data::MessageData,
-    varuint::VarUInt,
-    BoxedError, NO_STATE,
+    varuint::VarUInt, NO_STATE,
 };
 use thiserror::Error;
 

@@ -5,8 +5,7 @@ use std::io::{Read, Write};
 use crate::{
     decode::{Decode, DecodeResult},
     encode::Encode,
-    varuint::VarUInt,
-    BoxedError, NO_STATE,
+    varuint::VarUInt, NO_STATE,
 };
 
 pub const SERVER_NODE: [u8; 2] = [1, 0];
