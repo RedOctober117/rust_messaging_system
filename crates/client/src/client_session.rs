@@ -4,8 +4,8 @@ use std::{io::Result, time::Duration};
 use shared::message::Message;
 use shared::message_builder::MessageBuilder;
 use shared::message_data::MessageData;
-use shared::node::Node;
 use shared::response::Response;
+use shared::source_or_destination::SourceOrDestination;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::{
@@ -24,12 +24,12 @@ use crate::gather_user;
 //   user: u_downstream, w_upstream
 
 pub struct ClientSession {
-    user: Node,
+    user: SourceOrDestination,
     stream: TcpStream,
 }
 
 impl ClientSession {
-    pub async fn new(user: Node, server_addr: (Ipv4Addr, u16)) -> Result<Self> {
+    pub async fn new(user: SourceOrDestination, server_addr: (Ipv4Addr, u16)) -> Result<Self> {
         let stream: TcpStream;
 
         loop {
@@ -146,7 +146,7 @@ pub async fn spawn_reader(
                     // }
                     // MessageBody::Response(Response::UserID(_)) => todo!(),
                     MessageData::Text(_) => match (msg.source(), msg.data()) {
-                        (Node::User(_), MessageData::Text(_)) => {
+                        (SourceOrDestination::User(_), MessageData::Text(_)) => {
                             r_upstream.send(msg).await.map_or_else(
                                 |e| error!("Error forwarding Text to core: {e}"),
                                 |()| trace!("Forwarded Text to core."),
@@ -173,7 +173,7 @@ pub async fn spawn_core(
 ) {
     let auth_req = msg_template
         .clone()
-        .destination(Node::Server)
+        .destination(SourceOrDestination::Server)
         .data(MessageData::Request(shared::request::Request::Connect))
         .timestamp()
         .build();
@@ -209,7 +209,7 @@ pub async fn spawn_core(
             if let Some(msg) = r_downstream.recv().await {
                 trace!("Core downstream received {}", msg);
                 match (msg.source(), msg.data()) {
-                    (Node::User(user), MessageData::Text(t)) => {
+                    (SourceOrDestination::User(user), MessageData::Text(t)) => {
                         if let Ok(()) = stdout
                             .write_all(format!("{}: {}", user.format(), t).as_bytes())
                             .await

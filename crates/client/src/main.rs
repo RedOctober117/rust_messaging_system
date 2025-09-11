@@ -1,5 +1,5 @@
 use client_session::ClientSession;
-use shared::{node::Node, user::User};
+use shared::{source_or_destination::SourceOrDestination, user::User};
 use std::io::Result;
 use std::io::Write;
 use std::net::Ipv4Addr;
@@ -39,7 +39,7 @@ fn gather_ip() -> Result<Ipv4Addr> {
     }
 }
 
-fn gather_user() -> Result<Node> {
+fn gather_user() -> Result<SourceOrDestination> {
     let mut buffer = String::with_capacity(32);
 
     let id: u16;
@@ -69,7 +69,7 @@ fn gather_user() -> Result<Node> {
     let username = buffer.trim().to_string();
     buffer.clear();
 
-    Ok(Node::User(User::new(id, username)))
+    Ok(SourceOrDestination::User(User::new(id, username)))
 }
 
 // enum ClientError {

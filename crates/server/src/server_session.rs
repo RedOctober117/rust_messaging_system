@@ -1,7 +1,8 @@
 use std::{io::Result, net::IpAddr, sync::Arc};
 
 use shared::{
-    message::Message, message_data::MessageData, node::Node, request::Request, response::Response,
+    message::Message, message_data::MessageData, request::Request, response::Response,
+    source_or_destination::SourceOrDestination,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -46,7 +47,7 @@ impl ServerSession {
 }
 
 enum MessageDecision {
-    RemoveUser(Node),
+    RemoveUser(SourceOrDestination),
     SendUpstream(Message),
 }
 
@@ -78,7 +79,7 @@ async fn handle_message(msg: Message) -> MessageDecision {
             let time_received = msg.timestamp();
 
             let payload = Message::builder()
-                .source(Node::Server)
+                .source(SourceOrDestination::Server)
                 .destination(msg.source())
                 .data(MessageData::Response(Response::Ping(time_received)))
                 .timestamp()
@@ -88,7 +89,7 @@ async fn handle_message(msg: Message) -> MessageDecision {
         }
         MessageData::Request(Request::Echo(echo_msg)) => {
             let payload = Message::builder()
-                .source(Node::Server)
+                .source(SourceOrDestination::Server)
                 .destination(msg.source().to_owned())
                 .data(MessageData::Response(Response::Echo(echo_msg.to_owned())))
                 .timestamp()
@@ -111,7 +112,7 @@ async fn handle_message(msg: Message) -> MessageDecision {
 async fn spawn_server_thread(users_handle: Arc<UserMap>) {
     let (server_upstream, mut server_downstream) = mpsc::channel::<Message>(32);
 
-    users_handle.insert(Node::Server, server_upstream);
+    users_handle.insert(SourceOrDestination::Server, server_upstream);
 
     // spawn the server task to display received messages
     while let Some(msg) = server_downstream.recv().await {
@@ -150,7 +151,7 @@ async fn spawn_writer(mut downstream: Receiver<Message>, mut tx: OwnedWriteHalf)
 async fn spawn_reader(
     users_handle: Arc<UserMap>,
     mut buf_reader: BufReader<OwnedReadHalf>,
-    user: Node,
+    user: SourceOrDestination,
 ) -> Result<std::io::Error> {
     let mut received: Vec<u8>;
     loop {
@@ -176,7 +177,7 @@ async fn spawn_reader(
             Ok(msg) => {
                 trace!("Received {}", msg);
 
-                if msg.destination() != Node::NoNode {
+                if msg.destination() != SourceOrDestination::NoNode {
                     if let Some(upstream) = users_handle.get(&msg.destination()) {
                         trace!("Attempting to send message downstream to user {}.", user);
 
@@ -189,7 +190,7 @@ async fn spawn_reader(
                         upstream
                             .send(
                                 Message::builder()
-                                    .source(Node::Server)
+                                    .source(SourceOrDestination::Server)
                                     .destination(msg.source())
                                     .data(MessageData::Response(Response::UserNotFound(
                                         msg.destination(),
@@ -248,7 +249,7 @@ async fn parse_stream(users_handle: Arc<UserMap>, conn: TcpStream) {
                     trace!("Inserted {user} to hashmap\n");
 
                     let acceptance_payload = Message::builder()
-                        .source(Node::Server)
+                        .source(SourceOrDestination::Server)
                         .destination(user.to_owned())
                         .data(MessageData::Response(Response::ConnectSuccess))
                         .timestamp()
@@ -276,7 +277,7 @@ async fn parse_stream(users_handle: Arc<UserMap>, conn: TcpStream) {
                 } else {
                     trace!("User {user} already exists!\n");
                     let rejection_payload = Message::builder()
-                        .source(Node::Server)
+                        .source(SourceOrDestination::Server)
                         .destination(user.to_owned())
                         .data(MessageData::Response(Response::ConnectFail))
                         .timestamp()
