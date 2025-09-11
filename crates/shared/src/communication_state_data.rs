@@ -2,7 +2,12 @@ use std::io::{BufRead, Write};
 
 use thiserror::Error;
 
-use crate::{decode::Decode, encode::Encode, varuint::VarUInt, NO_STATE};
+use crate::{
+    decode::{Decode, DecodeResult},
+    encode::Encode,
+    varuint::VarUInt,
+    BoxedError, NO_STATE,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
@@ -63,10 +68,7 @@ impl Encode for CommunicationStateData {
 }
 
 impl Decode for CommunicationStateData {
-    fn decode_reader(
-        _state: u8,
-        reader: &mut impl BufRead,
-    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+    fn decode_reader(_state: u8, reader: &mut impl BufRead) -> DecodeResult<Self> {
         let code: CommunicationStateData =
             (*VarUInt::decode_reader(NO_STATE, reader)?).try_into()?;
         let mut buf = vec![];
@@ -98,6 +100,13 @@ mod test {
             *CommunicationStateData::decode_reader(NO_STATE, &mut reader).unwrap(),
             CommunicationStateData::RequestDisconnect
         )
+    }
+
+    #[test]
+    fn comm_state_decode_error() {
+        let mut reader: &[u8] = &[0xFF];
+
+        assert!(CommunicationStateData::decode_reader(NO_STATE, &mut reader).is_err(),)
     }
 
     #[test]

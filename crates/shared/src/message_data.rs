@@ -1,6 +1,9 @@
 use crate::{
-    communication_state_data::CommunicationStateData, decode::Decode, encode::Encode,
-    login_state_data::LoginStateData, NO_STATE,
+    communication_state_data::CommunicationStateData,
+    decode::{Decode, DecodeResult},
+    encode::Encode,
+    login_state_data::LoginStateData,
+    BoxedError, NO_STATE,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,10 +46,7 @@ impl Encode for MessageData {
 }
 
 impl Decode for MessageData {
-    fn decode_reader(
-        state: u8,
-        reader: &mut impl std::io::BufRead,
-    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+    fn decode_reader(state: u8, reader: &mut impl std::io::BufRead) -> DecodeResult<Self> {
         match state {
             0x00 => Ok(Box::new(MessageData::LoginStateData(
                 *LoginStateData::decode_reader(state, reader)?,

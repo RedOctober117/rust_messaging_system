@@ -1,35 +1,34 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    login_state_data::LoginStateData, message::Message, message_data::MessageData, node::Node,
-    varuint::VarUInt,
+    login_state_data::LoginStateData, message::Message, message_data::MessageData,
+    source_or_destination::SourceOrDestination, varuint::VarUInt,
 };
 
 #[derive(Clone)]
 pub struct MessageBuilder {
     data: MessageData,
     timestamp: VarUInt,
-    source: Node,
-    destination: Node,
+    source: SourceOrDestination,
+    destination: SourceOrDestination,
 }
 
 impl MessageBuilder {
     pub fn new() -> Self {
         Self {
-            source: Node::default(),
-            destination: Node::default(),
+            source: SourceOrDestination::default(),
+            destination: SourceOrDestination::default(),
             timestamp: VarUInt(0),
             data: MessageData::LoginStateData(LoginStateData::RequestConnect),
-            // body: MessageData::LoginStateData(LoginStateData::RequestConnect),
         }
     }
 
-    pub fn source(mut self, src: Node) -> Self {
+    pub fn source(mut self, src: SourceOrDestination) -> Self {
         self.source = src;
         self
     }
 
-    pub fn destination(mut self, dest: Node) -> Self {
+    pub fn destination(mut self, dest: SourceOrDestination) -> Self {
         self.destination = dest;
         self
     }
@@ -64,8 +63,8 @@ impl MessageBuilder {
 impl Default for MessageBuilder {
     fn default() -> Self {
         Self {
-            source: Node::default(),
-            destination: Node::default(),
+            source: SourceOrDestination::default(),
+            destination: SourceOrDestination::default(),
             timestamp: VarUInt(Self::now()),
             data: MessageData::LoginStateData(LoginStateData::RequestConnect),
         }

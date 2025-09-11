@@ -5,7 +5,11 @@ use std::{
 
 use thiserror::{self, Error};
 
-use crate::{decode::Decode, encode::Encode, NO_STATE};
+use crate::{
+    decode::{Decode, DecodeResult},
+    encode::Encode,
+    BoxedError, NO_STATE,
+};
 
 pub type VarUIntSize = u64;
 pub type RawVarUInt = Vec<u8>;
@@ -72,6 +76,20 @@ impl From<VarUInt> for u64 {
     }
 }
 
+impl From<u64> for VarUInt {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl TryFrom<usize> for VarUInt {
+    type Error = <u64 as TryFrom<usize>>::Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Ok(VarUInt(u64::try_from(value)?))
+    }
+}
+
 impl From<VarUInt> for usize {
     fn from(value: VarUInt) -> Self {
         value.0 as usize
@@ -108,10 +126,7 @@ impl Encode for VarUInt {
 }
 
 impl Decode for VarUInt {
-    fn decode_reader(
-        _state: u8,
-        reader: &mut impl BufRead,
-    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+    fn decode_reader(_state: u8, reader: &mut impl BufRead) -> DecodeResult<Self> {
         let mut result: VarUIntSize = 0;
         let mut shift: u8 = 0;
 

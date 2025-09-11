@@ -4,17 +4,22 @@ use std::{
 };
 
 use crate::{
-    decode::Decode, encode::Encode, login_state_data::LoginStateData,
-    message_builder::MessageBuilder, message_data::MessageData, node::Node, varuint::VarUInt,
-    NO_STATE,
+    decode::{Decode, DecodeResult},
+    encode::Encode,
+    login_state_data::LoginStateData,
+    message_builder::MessageBuilder,
+    message_data::MessageData,
+    source_or_destination::SourceOrDestination,
+    varuint::VarUInt,
+    BoxedError, NO_STATE,
 };
 
 #[derive(Clone, Debug)]
 pub struct Message {
     pub(crate) data: MessageData,
     pub(crate) timestamp: VarUInt,
-    pub(crate) source: Node,
-    pub(crate) destination: Node,
+    pub(crate) source: SourceOrDestination,
+    pub(crate) destination: SourceOrDestination,
 }
 
 impl Message {
@@ -26,11 +31,11 @@ impl Message {
         &self.data
     }
 
-    pub fn destination(&self) -> Node {
+    pub fn destination(&self) -> SourceOrDestination {
         self.destination.clone()
     }
 
-    pub fn source(&self) -> Node {
+    pub fn source(&self) -> SourceOrDestination {
         self.source.clone()
     }
 
@@ -74,17 +79,16 @@ impl Encode for Message {
 }
 
 impl Decode for Message {
-    fn decode_reader(
-        state: u8,
-        reader: &mut impl std::io::BufRead,
-    ) -> std::result::Result<Box<Self>, Box<dyn std::error::Error>> {
+    fn decode_reader(state: u8, reader: &mut impl std::io::BufRead) -> DecodeResult<Self> {
         let len = *VarUInt::decode_reader(state, reader)?;
 
         let take = reader.take(u64::from(len));
         let mut sized_buffer = BufReader::new(take);
 
-        let destination: Node = *Node::decode_reader(state, &mut sized_buffer)?;
-        let source: Node = *Node::decode_reader(state, &mut sized_buffer)?;
+        let destination: SourceOrDestination =
+            *SourceOrDestination::decode_reader(state, &mut sized_buffer)?;
+        let source: SourceOrDestination =
+            *SourceOrDestination::decode_reader(state, &mut sized_buffer)?;
         let timestamp: VarUInt = *VarUInt::decode_reader(state, &mut sized_buffer)?;
         let data: MessageData = (*LoginStateData::decode_reader(state, &mut sized_buffer)?).into();
 
@@ -102,7 +106,7 @@ mod test {
 
     use crate::{
         decode::Decode, encode::Encode, login_state_data::LoginStateData, message::Message,
-        message_data::MessageData, node::Node, NO_STATE,
+        message_data::MessageData, source_or_destination::SourceOrDestination, NO_STATE,
     };
 
     #[test]
@@ -111,8 +115,8 @@ mod test {
         let mut check_buffer = vec![];
         let builder = Message::builder();
         let msg = builder
-            .destination(Node::new("user_2"))
-            .source(Node::new("user_1"))
+            .destination(SourceOrDestination::new("user_2"))
+            .source(SourceOrDestination::new("user_1"))
             .timestamp()
             .data(MessageData::LoginStateData(LoginStateData::RequestConnect))
             .build();
@@ -150,7 +154,7 @@ mod test {
             msg.data().to_owned(),
             MessageData::LoginStateData(LoginStateData::RequestConnect)
         );
-        assert_eq!(msg.source(), Node::new("user_1"));
-        assert_eq!(msg.destination(), Node::new("user_2"));
+        assert_eq!(msg.source(), SourceOrDestination::new("user_1"));
+        assert_eq!(msg.destination(), SourceOrDestination::new("user_2"));
     }
 }

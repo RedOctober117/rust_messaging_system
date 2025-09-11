@@ -1,7 +1,11 @@
 use std::io::Write;
 
 use crate::{
-    decode::Decode, encode::Encode, message_data::MessageData, varuint::VarUInt, NO_STATE,
+    decode::{Decode, DecodeResult},
+    encode::Encode,
+    message_data::MessageData,
+    varuint::VarUInt,
+    BoxedError, NO_STATE,
 };
 use thiserror::Error;
 
@@ -59,10 +63,7 @@ impl Encode for LoginStateData {
 }
 
 impl Decode for LoginStateData {
-    fn decode_reader(
-        _state: u8,
-        reader: &mut impl std::io::BufRead,
-    ) -> Result<Box<Self>, Box<dyn std::error::Error>> {
+    fn decode_reader(_state: u8, reader: &mut impl std::io::BufRead) -> DecodeResult<Self> {
         let value = *VarUInt::decode_reader(NO_STATE, reader)?;
         LoginStateData::try_from(value).map(|v| Ok(Box::new(v)))?
     }
