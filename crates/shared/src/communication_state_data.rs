@@ -43,9 +43,7 @@ impl TryFrom<VarUInt> for CommunicationStateData {
 
 impl Encode for CommunicationStateData {
     fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> std::io::Result<()> {
-        writer
-            .write_all(&[self.discriminant()])
-            .map_err(|e| return e)?;
+        writer.write_all(&[self.discriminant()])?;
 
         let additional_data: &Vec<u8> = match self {
             CommunicationStateData::RequestEcho(e) => e,
@@ -110,7 +108,7 @@ mod test {
         value
             .write_encoded(NO_STATE, &mut buffer)
             .expect("buffer error");
-        assert_eq!(buffer[..], [0x00])
+        assert_eq!(buffer, [0x00])
     }
 
     #[test]
@@ -119,16 +117,16 @@ mod test {
         let text = "hello";
         let value = CommunicationStateData::CommunicationText(text.into());
 
-        let mut custom_buff = vec![];
-        custom_buff.push(value.discriminant());
+        let mut check_buf = vec![];
+        check_buf.push(value.discriminant());
         text.as_bytes()
             .iter()
-            .for_each(|b| custom_buff.push(b.to_owned()));
+            .for_each(|b| check_buf.push(b.to_owned()));
 
         value
             .write_encoded(NO_STATE, &mut buffer)
             .expect("buffer error");
-        assert_eq!(buffer[..], custom_buff)
+        assert_eq!(buffer, check_buf)
     }
 
     #[test]

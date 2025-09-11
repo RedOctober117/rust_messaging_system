@@ -67,3 +67,29 @@ impl Decode for LoginStateData {
         LoginStateData::try_from(value).map(|v| Ok(Box::new(v)))?
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{decode::Decode, encode::Encode, login_state_data::LoginStateData, NO_STATE};
+
+    #[test]
+    fn comm_state_decode() {
+        let mut reader: &[u8] = &[0x00];
+
+        assert_eq!(
+            *LoginStateData::decode_reader(NO_STATE, &mut reader).unwrap(),
+            LoginStateData::RequestConnect
+        )
+    }
+
+    #[test]
+    fn comm_state_encode() {
+        let mut buffer = vec![];
+        let value = LoginStateData::RequestConnect;
+
+        value
+            .write_encoded(NO_STATE, &mut buffer)
+            .expect("buffer error");
+        assert_eq!(buffer, [0x00])
+    }
+}

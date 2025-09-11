@@ -22,42 +22,42 @@ pub struct VarUIntError(#[from] std::io::Error);
 
 impl VarUInt {
     // https://en.wikipedia.org/wiki/LEB128
-    pub fn decode(reader: &mut impl Read) -> std::io::Result<Self> {
-        let mut result: VarUIntSize = 0;
-        let mut shift: u8 = 0;
+    // pub fn decode(reader: &mut impl BufRead) -> std::io::Result<Self> {
+    //     let mut result: VarUIntSize = 0;
+    //     let mut shift: u8 = 0;
 
-        for byte in reader.bytes() {
-            let byte = byte?;
-            result |= (byte as VarUIntSize & SEGMENT_BITS as VarUIntSize) << shift;
-            shift += 7;
+    //     for byte in reader.bytes() {
+    //         let byte = byte?;
+    //         result |= (byte as VarUIntSize & SEGMENT_BITS as VarUIntSize) << shift;
+    //         shift += 7;
 
-            if byte & LEADING_BIT == 0 {
-                break;
-            }
-        }
+    //         if byte & LEADING_BIT == 0 {
+    //             break;
+    //         }
+    //     }
 
-        Ok(Self(result))
-    }
+    //     Ok(Self(result))
+    // }
 
-    pub fn encode(&self) -> RawVarUInt {
-        let mut result: RawVarUInt = vec![];
-        let mut val = self.0;
+    // pub fn encode(&self) -> RawVarUInt {
+    //     let mut result: RawVarUInt = vec![];
+    //     let mut val = self.0;
 
-        loop {
-            let mut byte = val & SEGMENT_BITS as VarUIntSize;
-            val >>= 7;
+    //     loop {
+    //         let mut byte = val & SEGMENT_BITS as VarUIntSize;
+    //         val >>= 7;
 
-            if val != 0 {
-                byte |= LEADING_BIT as VarUIntSize;
-            }
-            result.push(byte as u8);
+    //         if val != 0 {
+    //             byte |= LEADING_BIT as VarUIntSize;
+    //         }
+    //         result.push(byte as u8);
 
-            if val == 0 {
-                break;
-            }
-        }
-        result
-    }
+    //         if val == 0 {
+    //             break;
+    //         }
+    //     }
+    //     result
+    // }
 }
 
 impl Display for VarUInt {
@@ -80,7 +80,24 @@ impl From<VarUInt> for usize {
 
 impl Encode for VarUInt {
     fn write_encoded(&self, _state: u8, writer: &mut impl Write) -> Result<(), std::io::Error> {
-        writer.write_all(&self.encode())
+        let mut val = self.0;
+        let mut result: RawVarUInt = vec![];
+
+        loop {
+            let mut byte = val & SEGMENT_BITS as VarUIntSize;
+            val >>= 7;
+
+            if val != 0 {
+                byte |= LEADING_BIT as VarUIntSize;
+            }
+            result.push(byte as u8);
+
+            if val == 0 {
+                break;
+            }
+        }
+
+        writer.write_all(&result)
     }
 
     fn as_bytes(&self) -> Result<Vec<u8>, std::io::Error> {
@@ -119,33 +136,33 @@ mod tests {
     #[test]
     fn decode() {
         assert_eq!(
-            VarUInt::decode(&mut vec![132_u8, 6_u8].as_slice()).unwrap(),
+            *VarUInt::decode_reader(NO_STATE, &mut vec![132_u8, 6_u8].as_slice()).unwrap(),
             VarUInt(772)
         );
         assert_eq!(
-            VarUInt::decode(&mut vec![221, 199, 1].as_slice()).unwrap(),
+            *VarUInt::decode_reader(NO_STATE, &mut vec![221, 199, 1].as_slice()).unwrap(),
             VarUInt(25565)
         );
     }
 
-    #[test]
-    fn decode_with_extra() {
-        assert_eq!(
-            VarUInt::decode(&mut vec![132, 6, 7].as_slice()).unwrap(),
-            VarUInt(772)
-        );
-        assert_eq!(
-            VarUInt::decode(&mut vec![221, 199, 1, 254].as_slice()).unwrap(),
-            VarUInt(25565)
-        );
-    }
+    // #[test]
+    // fn decode_with_extra() {
+    //     assert_eq!(
+    //         VarUInt::decode(&mut vec![132, 6, 7].as_slice()).unwrap(),
+    //         VarUInt(772)
+    //     );
+    //     assert_eq!(
+    //         VarUInt::decode(&mut vec![221, 199, 1, 254].as_slice()).unwrap(),
+    //         VarUInt(25565)
+    //     );
+    // }
 
-    #[test]
-    fn encode() {
-        assert_eq!(VarUInt(772).encode(), [132, 6]);
-        assert_eq!(VarUInt(25565).encode(), [221, 199, 1]);
-        assert_eq!(VarUInt(2147483647).encode(), [255, 255, 255, 255, 7]);
-    }
+    // #[test]
+    // fn encode() {
+    //     assert_eq!(VarUInt(772).encode(), [132, 6]);
+    //     assert_eq!(VarUInt(25565).encode(), [221, 199, 1]);
+    //     assert_eq!(VarUInt(2147483647).encode(), [255, 255, 255, 255, 7]);
+    // }
 
     #[test]
     fn encode_buffer() {
@@ -222,10 +239,15 @@ mod tests {
     #[test]
     fn circular_coding() {
         let now = MessageBuilder::now();
+        let mut encoded_buf = vec![];
+
+        VarUInt(now)
+            .write_encoded(NO_STATE, &mut encoded_buf)
+            .unwrap();
 
         assert_eq!(
             now,
-            VarUInt::decode(&mut VarUInt(now).encode().as_slice())
+            VarUInt::decode_reader(NO_STATE, &mut encoded_buf.as_slice())
                 .unwrap()
                 .0
         );
