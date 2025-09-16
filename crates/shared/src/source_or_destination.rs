@@ -5,7 +5,8 @@ use std::io::{Read, Write};
 use crate::{
     decode::{Decode, DecodeResult},
     encode::Encode,
-    varuint::VarUInt, NO_STATE,
+    varuint::VarUInt,
+    NO_STATE,
 };
 
 pub const SERVER_NODE: [u8; 2] = [1, 0];
@@ -48,8 +49,8 @@ impl Decode for SourceOrDestination {
 #[cfg(test)]
 mod test {
     use crate::{
-        decode::Decode, encode::Encode, source_or_destination::SourceOrDestination,
-        varuint::VarUInt, BoxedError, NO_STATE,
+        boxed_error::BoxedError, decode::Decode, encode::Encode,
+        source_or_destination::SourceOrDestination, varuint::VarUInt, NO_STATE,
     };
 
     #[test]

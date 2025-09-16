@@ -101,18 +101,18 @@ impl Encode for VarUInt {
         let mut val = self.0;
         let mut result: RawVarUInt = vec![];
 
-        loop {
+        let mut more = true;
+        while more {
             let mut byte = val & SEGMENT_BITS as VarUIntSize;
             val >>= 7;
 
             if val != 0 {
                 byte |= LEADING_BIT as VarUIntSize;
+            } else {
+                more = false;
             }
-            result.push(byte as u8);
 
-            if val == 0 {
-                break;
-            }
+            result.push(byte as u8);
         }
 
         writer.write_all(&result)

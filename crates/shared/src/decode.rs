@@ -1,6 +1,6 @@
 use std::{fmt::Debug, io::BufRead};
 
-use crate::BoxedError;
+use crate::boxed_error::BoxedError;
 
 pub type DecodeResult<T> = Result<Box<T>, BoxedError>;
 
